@@ -1,6 +1,6 @@
 import { 
   db, auth, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, 
-  query, where, Timestamp 
+  query, where, Timestamp, writeBatch 
 } from '../firebase';
 
 const TASKS_COLLECTION = 'tasks';
@@ -22,30 +22,20 @@ export const getStartOfWeek = (date) => {
   return d;
 };
 
-// Helper to determine completion status automatically based on timestamps
+const GRACE_PERIOD_MS = 5 * 60 * 1000;
+
 export const determineCompletionStatus = (scheduledStart, scheduledEnd, actualStart, actualEnd, taskStatus) => {
-  // If task is missed
   if (taskStatus === 'missed') return 'missed';
-  
-  // If no actual end, check if overdue
   if (!actualEnd) {
     const now = new Date();
     if (now > scheduledEnd) return 'overdue';
     return 'pending';
   }
-  
-  // Task completed, determine quality
   const isStartedOnTime = actualStart <= scheduledStart;
   const isCompletedOnTime = actualEnd <= scheduledEnd;
-  
-  if (isStartedOnTime && isCompletedOnTime) {
-    return 'completed_on_time';
-  } else if (actualStart < scheduledStart && actualEnd < scheduledEnd) {
-    return 'completed_early';
-  } else if (actualStart > scheduledStart || actualEnd > scheduledEnd) {
-    return 'completed_late';
-  }
-  
+  if (isStartedOnTime && isCompletedOnTime) return 'completed_on_time';
+  if (actualStart < scheduledStart && actualEnd < scheduledEnd) return 'completed_early';
+  if (actualStart > scheduledStart || actualEnd > scheduledEnd) return 'completed_late';
   return 'completed';
 };
 
@@ -68,7 +58,6 @@ const calculateMetrics = (tasks) => {
   
   const completionRate = total > 0 ? ((completedOnTime + completedEarly + completedLate) / total) * 100 : 0;
   
-  // Discipline score: starts at 100, penalized by reschedules, missed, late completions, overdue
   let disciplineScore = 100;
   disciplineScore -= totalReschedules * 2;
   disciplineScore -= missed * 10;
@@ -219,7 +208,7 @@ export const startTask = async (taskId, actualStartTime = null) => {
   await updateWeekMetrics(task.weekId);
 };
 
-export const completeTask = async (taskId, actualEndTime = null) => {
+export const completeTask = async (taskId, actualEndTime = null, completionType = null) => {
   const actualEnd = actualEndTime ? new Date(actualEndTime) : new Date();
   const taskRef = doc(db, TASKS_COLLECTION, taskId);
   const taskDoc = await getDoc(taskRef);
@@ -231,7 +220,6 @@ export const completeTask = async (taskId, actualEndTime = null) => {
   const [startHour, startMin] = task.startTime.split(':').map(Number);
   const [endHour, endMin] = task.endTime.split(':').map(Number);
   
-  // Calculate scheduled times
   const plannedStart = new Date(task.createdAt.toDate());
   const dayOffset = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].indexOf(task.day);
   plannedStart.setDate(plannedStart.getDate() + dayOffset);
@@ -239,17 +227,13 @@ export const completeTask = async (taskId, actualEndTime = null) => {
   const scheduledEnd = new Date(plannedStart);
   scheduledEnd.setHours(endHour, endMin, 0, 0);
   
-  // AUTO-DETERMINE completion status based on timestamps
-  let completionStatus;
-  const isStartedOnTime = actualStart <= plannedStart;
-  const isCompletedOnTime = actualEnd <= scheduledEnd;
-  
-  if (isStartedOnTime && isCompletedOnTime) {
-    completionStatus = 'completed_on_time';
-  } else if (actualStart < plannedStart && actualEnd < scheduledEnd) {
-    completionStatus = 'completed_early';
-  } else {
-    completionStatus = 'completed_late';
+  let finalCompletionType = completionType;
+  if (!finalCompletionType) {
+    const isStartedOnTime = actualStart <= plannedStart;
+    const isCompletedOnTime = actualEnd <= scheduledEnd;
+    if (isStartedOnTime && isCompletedOnTime) finalCompletionType = 'on_time';
+    else if (actualStart < plannedStart && actualEnd < scheduledEnd) finalCompletionType = 'early';
+    else finalCompletionType = 'late';
   }
   
   const plannedDuration = ((endHour * 60 + endMin) - (startHour * 60 + startMin));
@@ -258,13 +242,13 @@ export const completeTask = async (taskId, actualEndTime = null) => {
   let accuracy = 100;
   let bonus = 0;
   
-  if (completionStatus === 'completed_early') {
+  if (finalCompletionType === 'early') {
     bonus = 15;
     accuracy += bonus;
-  } else if (completionStatus === 'completed_on_time') {
+  } else if (finalCompletionType === 'on_time') {
     bonus = 10;
     accuracy += bonus;
-  } else if (completionStatus === 'completed_late') {
+  } else if (finalCompletionType === 'late') {
     const lateMinutes = Math.max(0, (actualEnd - scheduledEnd) / 60000);
     const penalty = Math.min(30, lateMinutes * 2);
     accuracy -= penalty;
@@ -286,10 +270,11 @@ export const completeTask = async (taskId, actualEndTime = null) => {
   
   await updateDoc(taskRef, {
     status: 'completed',
-    completionStatus: completionStatus,
+    completionStatus: finalCompletionType === 'early' ? 'completed_early' : finalCompletionType === 'on_time' ? 'completed_on_time' : 'completed_late',
     completion: 100,
     actualEnd: Timestamp.fromDate(actualEnd),
     accuracy: accuracy,
+    completionType: finalCompletionType,
     timeSpent: actualDuration,
     bonus: bonus,
     updatedAt: Timestamp.now()
@@ -396,7 +381,6 @@ export const checkMissedTasks = async (weekId, selectedDate) => {
       endTime.setHours(endHour, endMin, 0, 0);
       
       if (now > endTime) {
-        // Mark as overdue first, then after more time as missed
         if (now > new Date(endTime.getTime() + 24 * 60 * 60 * 1000)) {
           await markTaskMissed(task.id);
         } else {
@@ -454,4 +438,72 @@ export const updateTimeSlots = async (timeSlots) => {
   const settingsRef = doc(db, SETTINGS_COLLECTION, userId);
   await setDoc(settingsRef, { timeSlots, updatedAt: Timestamp.now() }, { merge: true });
   return timeSlots;
+};
+
+// NEW RESET FUNCTIONS
+export const deleteAllTasksForWeek = async (weekId) => {
+  const userId = getUserId();
+  const tasks = await getWeekTasks(weekId);
+  
+  const batch = writeBatch(db);
+  for (const task of tasks) {
+    const taskRef = doc(db, TASKS_COLLECTION, task.id);
+    batch.delete(taskRef);
+  }
+  await batch.commit();
+  
+  const weekRef = doc(db, WEEKS_COLLECTION, weekId);
+  await updateDoc(weekRef, {
+    metrics: {
+      completedTasks: 0,
+      totalTasks: 0,
+      completionRate: 0,
+      disciplineScore: 100,
+      timeAccuracy: 100,
+      weeklyScore: 0,
+      missedCount: 0,
+      totalReschedules: 0,
+      avgDelay: 0,
+      totalDelay: 0,
+      dishonestCount: 0,
+      completedOnTime: 0,
+      completedEarly: 0,
+      completedLate: 0,
+      overdue: 0
+    },
+    updatedAt: Timestamp.now()
+  });
+  
+  return true;
+};
+
+export const resetAllUserData = async () => {
+  const userId = getUserId();
+  
+  const tasksQuery = query(collection(db, TASKS_COLLECTION), where('userId', '==', userId));
+  const tasksSnapshot = await getDocs(tasksQuery);
+  
+  const batch = writeBatch(db);
+  tasksSnapshot.docs.forEach(doc => {
+    batch.delete(doc.ref);
+  });
+  await batch.commit();
+  
+  const weeksQuery = query(collection(db, WEEKS_COLLECTION), where('userId', '==', userId));
+  const weeksSnapshot = await getDocs(weeksQuery);
+  
+  const weekBatch = writeBatch(db);
+  weeksSnapshot.docs.forEach(doc => {
+    weekBatch.delete(doc.ref);
+  });
+  await weekBatch.commit();
+  
+  const settingsRef = doc(db, SETTINGS_COLLECTION, userId);
+  await setDoc(settingsRef, {
+    theme: { primary: '#a855f7', secondary: '#3b82f6' },
+    timeSlots: ['06:00','07:00','08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00','21:00','22:00'],
+    updatedAt: Timestamp.now()
+  }, { merge: true });
+  
+  return true;
 };

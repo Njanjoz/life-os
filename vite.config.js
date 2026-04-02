@@ -19,9 +19,20 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'firebase/app', 'firebase/auth', 'firebase/firestore'],
-          ui: ['lucide-react', 'recharts']
+        manualChunks(id) {
+          // Split vendor chunks for better caching
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom')) {
+              return 'react-vendor';
+            }
+            if (id.includes('firebase')) {
+              return 'firebase-vendor';
+            }
+            if (id.includes('lucide-react') || id.includes('recharts')) {
+              return 'ui-vendor';
+            }
+            return 'vendor';
+          }
         }
       }
     }

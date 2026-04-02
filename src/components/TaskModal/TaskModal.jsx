@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Trash2, Clock, Calendar, Tag, Layers, Edit3, AlertCircle } from 'lucide-react';
 import { updateTask, deleteTask } from '../../services/firebaseTaskService';
+import { useRealTimeClock } from '../../hooks/useRealTimeClock';
 
 const CATEGORIES = {
   'Study': {
@@ -37,7 +38,18 @@ const CATEGORIES = {
   }
 };
 
-export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) => {
+// Helper to get the actual date for a given day in the current week
+const getDateForDay = (dayName, weekStartDate) => {
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const startOfWeek = new Date(weekStartDate);
+  const dayIndex = days.indexOf(dayName);
+  const targetDate = new Date(startOfWeek);
+  targetDate.setDate(startOfWeek.getDate() + dayIndex);
+  return targetDate;
+};
+
+export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, onUpdate, theme }) => {
+  const { now, isTimePast, isDayPast } = useRealTimeClock(1000);
   const [formData, setFormData] = useState({
     title: '',
     category: 'Study',
@@ -50,27 +62,77 @@ export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) =>
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [timeError, setTimeError] = useState('');
 
+  // Initialize form data when modal opens
   useEffect(() => {
-    if (task) {
-      const categoryData = CATEGORIES[task.category];
-      const isCustomSubcategory = categoryData && !categoryData.subcategories.includes(task.subcategory);
-      
-      setFormData({
-        title: task.title || '',
-        category: task.category || 'Study',
-        subcategory: isCustomSubcategory ? '+ Custom' : (task.subcategory || 'Lecture Review'),
-        customSubcategory: isCustomSubcategory ? task.subcategory : '',
-        startTime: task.startTime || '08:00',
-        endTime: task.endTime || '10:00',
-        day: task.day || 'Monday'
-      });
-      setShowCustomInput(isCustomSubcategory);
+    if (isOpen) {
+      if (task) {
+        // Editing existing task
+        const categoryData = CATEGORIES[task.category];
+        const isCustomSubcategory = categoryData && !categoryData.subcategories.includes(task.subcategory);
+        
+        setFormData({
+          title: task.title || '',
+          category: task.category || 'Study',
+          subcategory: isCustomSubcategory ? '+ Custom' : (task.subcategory || 'Lecture Review'),
+          customSubcategory: isCustomSubcategory ? task.subcategory : '',
+          startTime: task.startTime || '08:00',
+          endTime: task.endTime || '10:00',
+          day: task.day || 'Monday'
+        });
+        setShowCustomInput(isCustomSubcategory);
+      } else if (day && time) {
+        // Adding new task to specific slot
+        setFormData({
+          title: '',
+          category: 'Study',
+          subcategory: 'Lecture Review',
+          customSubcategory: '',
+          startTime: time,
+          endTime: `${parseInt(time.split(':')[0]) + 1}:00`,
+          day: day
+        });
+        setShowCustomInput(false);
+      } else {
+        // Adding new task from add button
+        setFormData({
+          title: '',
+          category: 'Study',
+          subcategory: 'Lecture Review',
+          customSubcategory: '',
+          startTime: '08:00',
+          endTime: '10:00',
+          day: 'Monday'
+        });
+        setShowCustomInput(false);
+      }
       setError('');
+      setTimeError('');
     }
-  }, [task]);
+  }, [isOpen, task, day, time]);
 
-  if (!isOpen || !task) return null;
+  // Validate time against current real-time clock
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const selectedDate = getDateForDay(formData.day, new Date());
+    const isTimeInPast = isTimePast(formData.day, formData.startTime, selectedDate);
+    const isDayInPast = isDayPast(formData.day);
+    
+    if (!task && (isTimeInPast || isDayInPast)) {
+      if (isDayInPast) {
+        setTimeError(`Cannot schedule tasks on ${formData.day} - this day has already passed.`);
+      } else if (isTimeInPast) {
+        const currentTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setTimeError(`Cannot schedule tasks at ${formData.startTime} - this time has already passed. Current time is ${currentTime}.`);
+      }
+    } else {
+      setTimeError('');
+    }
+  }, [formData.day, formData.startTime, isOpen, task, now, isTimePast, isDayPast]);
+
+  if (!isOpen) return null;
 
   const currentCategory = CATEGORIES[formData.category];
   const availableSubcategories = currentCategory?.subcategories || [];
@@ -81,6 +143,16 @@ export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) =>
   };
 
   const handleSave = async () => {
+    // Validate against past time
+    const selectedDate = getDateForDay(formData.day, new Date());
+    const isTimeInPast = isTimePast(formData.day, formData.startTime, selectedDate);
+    const isDayInPast = isDayPast(formData.day);
+    
+    if (!task && (isTimeInPast || isDayInPast)) {
+      setTimeError('Cannot schedule tasks in the past! Please select a future time.');
+      return;
+    }
+    
     if (formData.startTime >= formData.endTime) {
       setError('End time must be after start time');
       return;
@@ -104,30 +176,36 @@ export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) =>
         return;
       }
       
-      await updateTask(task.id, {
+      const taskData = {
         title: formData.title,
         category: formData.category,
         subcategory: finalSubcategory,
         startTime: formData.startTime,
         endTime: formData.endTime,
         day: formData.day
-      });
+      };
       
-      onUpdate();
+      if (onSave) {
+        await onSave(taskData);
+      } else if (task && onUpdate) {
+        await updateTask(task.id, taskData);
+        onUpdate();
+      }
+      
       onClose();
     } catch (err) {
-      setError('Failed to update task: ' + err.message);
+      setError('Failed to save task: ' + err.message);
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (confirm('Delete this task? This cannot be undone.')) {
+    if (task && confirm('Delete this task? This cannot be undone.')) {
       setSaving(true);
       try {
         await deleteTask(task.id);
-        onUpdate();
+        if (onUpdate) onUpdate();
         onClose();
       } catch (err) {
         setError('Failed to delete task: ' + err.message);
@@ -137,6 +215,10 @@ export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) =>
     }
   };
 
+  // Get current time for display
+  const currentTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const currentDate = now.toLocaleDateString();
+
   return (
     <div className="fixed inset-0 z-[10005] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
       <div className="bg-slate-900 rounded-2xl border border-white/20 shadow-2xl overflow-hidden w-full max-w-[500px] max-h-[90vh] overflow-y-auto">
@@ -145,13 +227,20 @@ export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) =>
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <Calendar size={20} style={{ color: theme?.primary || '#a855f7' }} />
-              Edit Task
+              {task ? 'Edit Task' : 'Create New Task'}
             </h2>
             <button onClick={onClose} className="text-slate-400 hover:text-white transition p-1 rounded">
               <X size={20} />
             </button>
           </div>
-          {task.status === 'active' && (
+          
+          {/* Real-time clock display */}
+          <div className="mt-2 text-xs text-slate-500 flex items-center gap-2">
+            <Clock size={10} className="text-purple-400" />
+            <span>Current time: {currentTime} | {currentDate}</span>
+          </div>
+          
+          {task?.status === 'active' && (
             <p className="text-xs text-orange-400 mt-2 flex items-center gap-1">
               <AlertCircle size={12} />
               Task is currently active. Time changes will affect your schedule.
@@ -163,6 +252,13 @@ export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) =>
           {error && (
             <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
               {error}
+            </div>
+          )}
+          
+          {timeError && (
+            <div className="mb-4 p-3 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 text-sm flex items-center gap-2">
+              <AlertCircle size={14} />
+              {timeError}
             </div>
           )}
           
@@ -186,12 +282,22 @@ export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) =>
               <select
                 value={formData.day}
                 onChange={(e) => setFormData({ ...formData, day: e.target.value })}
-                className="w-full p-3 rounded-xl bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
+                className={`w-full p-3 rounded-xl bg-slate-800 border ${
+                  !task && isDayPast(formData.day) ? 'border-red-500/50 bg-red-900/20' : 'border-white/10'
+                } text-white text-sm focus:border-purple-500 focus:outline-none`}
               >
-                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(d => (
-                  <option key={d}>{d}</option>
-                ))}
+                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(d => {
+                  const isPast = isDayPast(d);
+                  return (
+                    <option key={d} value={d} disabled={!task && isPast}>
+                      {d} {!task && isPast ? '(Past Day - Cannot Schedule)' : ''}
+                    </option>
+                  );
+                })}
               </select>
+              {!task && isDayPast(formData.day) && (
+                <p className="text-xs text-red-400 mt-1">This day has already passed. Please select a future day.</p>
+              )}
             </div>
 
             <div>
@@ -205,7 +311,11 @@ export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) =>
                     type="time"
                     value={formData.startTime}
                     onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
-                    className="w-full p-3 rounded-xl bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
+                    className={`w-full p-3 rounded-xl bg-slate-800 border ${
+                      !task && !isDayPast(formData.day) && isTimePast(formData.day, formData.startTime, getDateForDay(formData.day, new Date())) 
+                        ? 'border-red-500/50 bg-red-900/20' 
+                        : 'border-white/10'
+                    } text-white text-sm focus:border-purple-500 focus:outline-none`}
                   />
                 </div>
                 <div className="flex-1">
@@ -218,6 +328,9 @@ export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) =>
                   />
                 </div>
               </div>
+              {!task && !isDayPast(formData.day) && isTimePast(formData.day, formData.startTime, getDateForDay(formData.day, new Date())) && (
+                <p className="text-xs text-red-400 mt-1">This time has already passed. Please select a future time.</p>
+              )}
             </div>
 
             <div>
@@ -296,20 +409,26 @@ export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) =>
             <div className="flex gap-3 pt-2">
               <button
                 onClick={handleSave}
-                disabled={saving}
-                className="flex-1 py-3 rounded-xl text-white font-medium flex items-center justify-center gap-2 transition hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: theme?.primary || '#a855f7' }}
+                disabled={saving || (!task && (isDayPast(formData.day) || isTimePast(formData.day, formData.startTime, getDateForDay(formData.day, new Date()))))}
+                className={`flex-1 py-3 rounded-xl text-white font-medium flex items-center justify-center gap-2 transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed`}
+                style={{ 
+                  backgroundColor: (!task && (isDayPast(formData.day) || isTimePast(formData.day, formData.startTime, getDateForDay(formData.day, new Date()))))
+                    ? '#475569' 
+                    : (theme?.primary || '#a855f7')
+                }}
               >
                 {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save size={18} />}
-                {saving ? 'Saving...' : 'Save Changes'}
+                {saving ? 'Saving...' : (task ? 'Update Task' : 'Add Task')}
               </button>
-              <button
-                onClick={handleDelete}
-                disabled={saving}
-                className="px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium transition disabled:opacity-50"
-              >
-                <Trash2 size={18} />
-              </button>
+              {task && (
+                <button
+                  onClick={handleDelete}
+                  disabled={saving}
+                  className="px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium transition disabled:opacity-50"
+                >
+                  <Trash2 size={18} />
+                </button>
+              )}
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List } from 'lucide-react';
+import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
 import { TaskModal } from '../TaskModal/TaskModal';
 import { useRealTimeClock } from '../../hooks/useRealTimeClock';
@@ -27,6 +27,7 @@ export default function WeekView() {
   const [newTimeSlot, setNewTimeSlot] = useState('12:00');
   const [viewMode, setViewMode] = useState('day');
   const [selectedDay, setSelectedDay] = useState(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1);
+  const [expandedSections, setExpandedSections] = useState({});
   const isLoadingRef = useRef(false);
 
   const loadWeek = useCallback(async () => {
@@ -166,6 +167,36 @@ export default function WeekView() {
   const currentDayTasks = tasks.filter(t => t.day === DAYS[selectedDay]);
   const currentDayTimes = [...new Set(currentDayTasks.map(t => t.startTime))].sort();
 
+  // Get the current time to determine which slots to show by default
+  const getCurrentTimeSlotIndex = () => {
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+    return timeSlots.findIndex(slot => {
+      const [hour, minute] = slot.split(':').map(Number);
+      return hour * 60 + minute >= currentTime;
+    });
+  };
+
+  const currentSlotIndex = getCurrentTimeSlotIndex();
+  const visibleCount = 3; // Show 3 slots by default
+  const startIndex = Math.max(0, currentSlotIndex - 1);
+  
+  // For week view, we need to handle expansion per day or globally
+  const toggleSection = (sectionId) => {
+    setExpandedSections(prev => ({ ...prev, [sectionId]: !prev[sectionId] }));
+  };
+
+  // Get visible time slots for day view
+  const getVisibleTimeSlots = () => {
+    if (expandedSections['dayView'] || currentDayTimes.length <= visibleCount) {
+      return currentDayTimes;
+    }
+    const visible = currentDayTimes.slice(startIndex, startIndex + visibleCount);
+    return visible;
+  };
+
+  const visibleDaySlots = getVisibleTimeSlots();
+  const hasMoreSlots = currentDayTimes.length > visibleCount && !expandedSections['dayView'];
+
   if (loading && tasks.length === 0) {
     return <div className="flex justify-center items-center h-96 w-full"><div className="animate-spin rounded-full h-8 w-8 border-2 border-purple-500 border-t-transparent"></div><p className="ml-2 text-xs text-slate-400">Loading...</p></div>;
   }
@@ -252,7 +283,7 @@ export default function WeekView() {
           </div>
         )}
 
-        {/* Time Slots Grid - Full Width */}
+        {/* Time Slots Grid - Collapsible for Day View */}
         <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-xl overflow-hidden w-full">
           <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : `grid-cols-${DAYS.length + 1}`} border-b border-white/10 bg-white/5 w-full`}>
             <div className="p-2 text-center text-[9px] font-bold text-slate-500 uppercase border-r border-white/5">Time</div>
@@ -267,26 +298,21 @@ export default function WeekView() {
             })}
           </div>
 
-          {(viewMode === 'day' ? currentDayTimes : timeSlots).map((time, slotIdx) => {
-            const hasTasks = viewMode === 'day' 
-              ? currentDayTasks.some(t => t.startTime === time)
-              : DAYS.some(day => getTaskAtSlot(day, time));
-            
-            if (!hasTasks && viewMode === 'week') return null;
-            
-            return (
-              <div key={time} className={`grid ${viewMode === 'day' ? 'grid-cols-1' : `grid-cols-${DAYS.length + 1}`} border-b border-white/10 relative w-full`}>
-                <div className="p-1.5 border-r border-white/5 flex items-center justify-center bg-white/5">
-                  <span className="text-[9px] font-mono text-slate-400">{time}</span>
-                </div>
-                {viewMode === 'day' ? (
-                  <div className="p-0.5 w-full">
-                    {(() => {
-                      const task = getTaskAtSlot(DAYS[selectedDay], time);
-                      const date = getDayDate(DAYS[selectedDay]);
-                      const isPast = isDayPastForDate(date);
-                      const canAdd = !isPast && !isTimePast(DAYS[selectedDay], time, date);
-                      return task ? (
+          {viewMode === 'day' ? (
+            // DAY VIEW - Collapsible time slots
+            <>
+              {visibleDaySlots.map((time, slotIdx) => {
+                const task = getTaskAtSlot(DAYS[selectedDay], time);
+                const date = getDayDate(DAYS[selectedDay]);
+                const isPast = isDayPastForDate(date);
+                const canAdd = !isPast && !isTimePast(DAYS[selectedDay], time, date);
+                return (
+                  <div key={time} className="grid grid-cols-1 border-b border-white/10 relative w-full">
+                    <div className="p-1.5 border-r border-white/5 flex items-center justify-between bg-white/5">
+                      <span className="text-[9px] font-mono text-slate-400">{time}</span>
+                    </div>
+                    <div className="p-0.5 w-full">
+                      {task ? (
                         <TaskCell task={task} weekId={week?.id} now={now} selectedDate={date} onUpdate={handleRefresh} theme={theme} isPast={isPast} viewMode={viewMode} />
                       ) : canAdd ? (
                         <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-12 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
@@ -296,11 +322,42 @@ export default function WeekView() {
                         <div className="h-12 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center">
                           <Lock size={10} className="text-slate-600" />
                         </div>
-                      );
-                    })()}
+                      )}
+                    </div>
                   </div>
-                ) : (
-                  DAYS.map(day => {
+                );
+              })}
+              
+              {/* Expand/Collapse Button for Day View */}
+              {currentDayTimes.length > visibleCount && (
+                <button
+                  onClick={() => toggleSection('dayView')}
+                  className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
+                >
+                  {expandedSections['dayView'] ? (
+                    <>
+                      <ChevronUp size={12} /> Show Less ({currentDayTimes.length - visibleCount} hidden)
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={12} /> Show More ({currentDayTimes.length - visibleCount} more time slots)
+                    </>
+                  )}
+                </button>
+              )}
+            </>
+          ) : (
+            // WEEK VIEW - Show all time slots (can be expanded per row if needed)
+            (viewMode === 'day' ? currentDayTimes : timeSlots).map((time, slotIdx) => {
+              const hasTasks = DAYS.some(day => getTaskAtSlot(day, time));
+              if (!hasTasks && viewMode === 'week') return null;
+              
+              return (
+                <div key={time} className={`grid ${viewMode === 'day' ? 'grid-cols-1' : `grid-cols-${DAYS.length + 1}`} border-b border-white/10 relative w-full`}>
+                  <div className="p-1.5 border-r border-white/5 flex items-center justify-center bg-white/5">
+                    <span className="text-[9px] font-mono text-slate-400">{time}</span>
+                  </div>
+                  {DAYS.map(day => {
                     const task = getTaskAtSlot(day, time);
                     const date = getDayDate(day);
                     const isPast = isDayPastForDate(date);
@@ -320,16 +377,16 @@ export default function WeekView() {
                         )}
                       </div>
                     );
-                  })
-                )}
-                {currentPos && currentPos.slotIndex === slotIdx && viewMode === 'week' && (
-                  <div className="absolute left-0 right-0 pointer-events-none z-10">
-                    <div className="h-[1px] bg-red-500 w-full" />
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                  })}
+                  {currentPos && currentPos.slotIndex === slotIdx && viewMode === 'week' && (
+                    <div className="absolute left-0 right-0 pointer-events-none z-10">
+                      <div className="h-[1px] bg-red-500 w-full" />
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
 
         {/* Empty State */}

@@ -22,6 +22,13 @@ export const getStartOfWeek = (date) => {
   return d;
 };
 
+// Helper to determine completion type automatically
+export const getCompletionType = (scheduledStart, scheduledEnd, actualEnd) => {
+  if (actualEnd < scheduledStart) return 'early';
+  if (actualEnd >= scheduledStart && actualEnd <= scheduledEnd) return 'on_time';
+  return 'late';
+};
+
 const calculateMetrics = (tasks) => {
   const total = tasks.length;
   const completed = tasks.filter(t => t.status === 'completed').length;
@@ -29,6 +36,12 @@ const calculateMetrics = (tasks) => {
   const totalReschedules = tasks.reduce((sum, t) => sum + (t.rescheduleCount || 0), 0);
   const totalDelay = tasks.reduce((sum, t) => sum + Math.max(0, t.delay || 0), 0);
   const avgDelay = totalDelay / (tasks.filter(t => t.delay > 0).length || 1);
+  const dishonestCount = tasks.filter(t => t.completionType === 'manual_dishonest').length;
+  
+  // Track completion types
+  const earlyCount = tasks.filter(t => t.completionType === 'early').length;
+  const onTimeCount = tasks.filter(t => t.completionType === 'on_time').length;
+  const lateCount = tasks.filter(t => t.completionType === 'late').length;
   
   const completedTasks = tasks.filter(t => t.status === 'completed');
   const avgAccuracy = completedTasks.length > 0 
@@ -41,9 +54,10 @@ const calculateMetrics = (tasks) => {
   disciplineScore -= totalReschedules * 2;
   disciplineScore -= missed * 10;
   disciplineScore -= Math.min(50, avgDelay / 2);
+  disciplineScore -= dishonestCount * 15;
   disciplineScore = Math.max(0, Math.min(100, disciplineScore));
   
-  const weeklyScore = (completionRate * 0.4) + (disciplineScore * 0.4) + (avgAccuracy * 0.2);
+  const weeklyScore = (completionRate * 0.3) + (disciplineScore * 0.3) + (avgAccuracy * 0.2) + ((earlyCount / (completed || 1)) * 20);
   
   return {
     completedTasks: completed,
@@ -55,7 +69,11 @@ const calculateMetrics = (tasks) => {
     missedCount: missed,
     totalReschedules: totalReschedules,
     avgDelay: Math.round(avgDelay * 10) / 10,
-    totalDelay: Math.round(totalDelay)
+    totalDelay: Math.round(totalDelay),
+    dishonestCount: dishonestCount,
+    earlyCount: earlyCount,
+    onTimeCount: onTimeCount,
+    lateCount: lateCount
   };
 };
 
@@ -85,7 +103,11 @@ export const getCurrentWeek = async (selectedDate = new Date()) => {
         missedCount: 0,
         totalReschedules: 0,
         avgDelay: 0,
-        totalDelay: 0
+        totalDelay: 0,
+        dishonestCount: 0,
+        earlyCount: 0,
+        onTimeCount: 0,
+        lateCount: 0
       }
     };
     await setDoc(weekRef, weekData);
@@ -119,12 +141,14 @@ export const addTask = async (weekId, taskData) => {
     endTime: taskData.endTime,
     status: 'pending',
     completion: 0,
-    rescheduleCount: 0,
+    rescheduleCount: taskData.rescheduleCount || 0,
     actualStart: null,
     actualEnd: null,
     delay: 0,
     accuracy: 0,
     timeSpent: 0,
+    completionType: null,
+    bonus: 0,
     priority: taskData.priority || 'medium',
     notes: taskData.notes || '',
     createdAt: Timestamp.now(),
@@ -153,7 +177,6 @@ export const startTask = async (taskId, actualStartTime = null) => {
   if (!task) throw new Error('Task not found');
   if (task.status === 'completed') return;
   
-  // Calculate delay from planned start time
   const [startHour, startMin] = task.startTime.split(':').map(Number);
   const plannedStart = new Date(task.createdAt.toDate());
   const dayOffset = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].indexOf(task.day);
@@ -172,7 +195,7 @@ export const startTask = async (taskId, actualStartTime = null) => {
   await updateWeekMetrics(task.weekId);
 };
 
-export const completeTask = async (taskId, actualEndTime = null) => {
+export const completeTask = async (taskId, actualEndTime = null, completionType = null) => {
   const actualEnd = actualEndTime ? new Date(actualEndTime) : new Date();
   const taskRef = doc(db, TASKS_COLLECTION, taskId);
   const taskDoc = await getDoc(taskRef);
@@ -183,17 +206,50 @@ export const completeTask = async (taskId, actualEndTime = null) => {
   const actualStart = task.actualStart ? task.actualStart.toDate() : new Date();
   const [startHour, startMin] = task.startTime.split(':').map(Number);
   const [endHour, endMin] = task.endTime.split(':').map(Number);
+  const plannedStart = new Date(task.createdAt.toDate());
+  const dayOffset = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].indexOf(task.day);
+  plannedStart.setDate(plannedStart.getDate() + dayOffset);
+  plannedStart.setHours(startHour, startMin, 0, 0);
+  const scheduledEnd = new Date(plannedStart);
+  scheduledEnd.setHours(endHour, endMin, 0, 0);
+  
   const plannedDuration = ((endHour * 60 + endMin) - (startHour * 60 + startMin));
   const actualDuration = (actualEnd - actualStart) / 60000;
   
-  // Calculate accuracy based on actual vs planned
+  // Auto-detect completion type if not provided
+  let finalCompletionType = completionType;
+  if (!finalCompletionType) {
+    finalCompletionType = getCompletionType(plannedStart, scheduledEnd, actualEnd);
+  }
+  
   let accuracy = 100;
+  let bonus = 0;
+  let honestyPenalty = 0;
+  
+  // Apply bonuses/penalties based on completion type
+  if (finalCompletionType === 'early') {
+    bonus = 15;
+    accuracy += bonus;
+  } else if (finalCompletionType === 'on_time') {
+    bonus = 10;
+    accuracy += bonus;
+  } else if (finalCompletionType === 'late') {
+    const lateMinutes = Math.max(0, (actualEnd - scheduledEnd) / 60000);
+    const penalty = Math.min(30, lateMinutes * 2);
+    accuracy -= penalty;
+  } else if (finalCompletionType === 'manual_dishonest') {
+    honestyPenalty = 25;
+    accuracy -= honestyPenalty;
+  } else if (finalCompletionType === 'manual_honest') {
+    honestyPenalty = 0;
+    accuracy -= 5;
+  }
+  
+  // Time efficiency calculation
   if (actualDuration > plannedDuration) {
-    // Took longer than planned
     const overtime = actualDuration - plannedDuration;
     accuracy -= Math.min(40, overtime * 4);
   } else if (actualDuration < plannedDuration) {
-    // Finished early - bonus
     const earlyFinish = plannedDuration - actualDuration;
     accuracy += Math.min(20, earlyFinish * 2);
   }
@@ -205,15 +261,15 @@ export const completeTask = async (taskId, actualEndTime = null) => {
   
   accuracy = Math.max(0, Math.min(100, Math.round(accuracy * 10) / 10));
   
-  // Calculate completion percentage based on actual time spent vs planned
-  const completionPercentage = Math.min(100, Math.max(0, Math.round((actualDuration / plannedDuration) * 100)));
-  
   await updateDoc(taskRef, {
     status: 'completed',
-    completion: completionPercentage,
+    completion: 100,
     actualEnd: Timestamp.fromDate(actualEnd),
     accuracy: accuracy,
+    completionType: finalCompletionType,
     timeSpent: actualDuration,
+    bonus: bonus,
+    honestyPenalty: honestyPenalty,
     updatedAt: Timestamp.now()
   });
   

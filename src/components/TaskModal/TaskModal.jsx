@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Clock, Calendar, Tag, Layers, Edit3, AlertCircle } from 'lucide-react';
-import { useRealTimeClock } from '../../hooks/useRealTimeClock';
+import { X, Save, Trash2, Clock, Calendar, Tag, Layers, Edit3, AlertCircle } from 'lucide-react';
+import { updateTask, deleteTask } from '../../services/firebaseTaskService';
 
-// Fixed Categories with Subcategories
 const CATEGORIES = {
   'Study': {
     icon: '📚',
@@ -38,8 +37,7 @@ const CATEGORIES = {
   }
 };
 
-export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, onUpdate, theme }) => {
-  const { isTimePast, isDayPast, currentHour, currentMinute } = useRealTimeClock();
+export const TaskModal = ({ isOpen, onClose, task, weekId, onUpdate, theme }) => {
   const [formData, setFormData] = useState({
     title: '',
     category: 'Study',
@@ -50,7 +48,8 @@ export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, on
     day: 'Monday'
   });
   const [showCustomInput, setShowCustomInput] = useState(false);
-  const [timeError, setTimeError] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (task) {
@@ -67,105 +66,11 @@ export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, on
         day: task.day || 'Monday'
       });
       setShowCustomInput(isCustomSubcategory);
-    } else if (day && time) {
-      setFormData({
-        title: '',
-        category: 'Study',
-        subcategory: 'Lecture Review',
-        customSubcategory: '',
-        startTime: time,
-        endTime: `${parseInt(time.split(':')[0]) + 1}:00`,
-        day: day
-      });
-      setShowCustomInput(false);
+      setError('');
     }
-  }, [task, day, time]);
+  }, [task]);
 
-  // Check if selected time is in the past
-  useEffect(() => {
-    if (formData.day && formData.startTime) {
-      const isPast = isTimePast(formData.day, formData.startTime, new Date());
-      if (isPast && !task) {
-        setTimeError(`Cannot schedule tasks in the past. Current time: ${currentHour.toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`);
-      } else {
-        setTimeError('');
-      }
-    }
-  }, [formData.day, formData.startTime, isTimePast, task, currentHour, currentMinute]);
-
-  if (!isOpen) return null;
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    
-    // Validate time is not in the past
-    if (!task && isTimePast(formData.day, formData.startTime, new Date())) {
-      setTimeError('Cannot schedule tasks in the past!');
-      return;
-    }
-    
-    if (formData.startTime >= formData.endTime) {
-      setTimeError('End time must be after start time');
-      return;
-    }
-    
-    if (formData.title.trim()) {
-      let finalSubcategory = formData.subcategory;
-      if (formData.subcategory === '+ Custom' && formData.customSubcategory.trim()) {
-        finalSubcategory = formData.customSubcategory.trim();
-      } else if (formData.subcategory === '+ Custom' && !formData.customSubcategory.trim()) {
-        setTimeError('Please enter a custom subcategory or select from the list');
-        return;
-      }
-      
-      const taskData = {
-        title: formData.title,
-        category: formData.category,
-        subcategory: finalSubcategory,
-        startTime: formData.startTime,
-        endTime: formData.endTime,
-        day: formData.day
-      };
-      
-      if (onSave) {
-        onSave(taskData);
-      } else if (task && onUpdate) {
-        const data = localStorage.getItem('lifeos_data_v3');
-        if (data) {
-          const parsed = JSON.parse(data);
-          const week = parsed.weeks[weekId];
-          if (week) {
-            const taskIndex = week.tasks.findIndex(t => t.id === task.id);
-            if (taskIndex !== -1) {
-              week.tasks[taskIndex] = {
-                ...week.tasks[taskIndex],
-                ...taskData
-              };
-              localStorage.setItem('lifeos_data_v3', JSON.stringify(parsed));
-              onUpdate();
-            }
-          }
-        }
-      }
-      onClose();
-    }
-  };
-
-  const handleDelete = () => {
-    if (task && confirm('Delete this task?')) {
-      const data = localStorage.getItem('lifeos_data_v3');
-      if (data) {
-        const parsed = JSON.parse(data);
-        const week = parsed.weeks[weekId];
-        if (week) {
-          week.tasks = week.tasks.filter(t => t.id !== task.id);
-          localStorage.setItem('lifeos_data_v3', JSON.stringify(parsed));
-          onUpdate();
-        }
-      }
-      onClose();
-    }
-  };
+  if (!isOpen || !task) return null;
 
   const currentCategory = CATEGORIES[formData.category];
   const availableSubcategories = currentCategory?.subcategories || [];
@@ -175,42 +80,105 @@ export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, on
     setShowCustomInput(value === '+ Custom');
   };
 
-  const isDayPastValue = isDayPast(formData.day);
+  const handleSave = async () => {
+    if (formData.startTime >= formData.endTime) {
+      setError('End time must be after start time');
+      return;
+    }
+    
+    if (!formData.title.trim()) {
+      setError('Task title is required');
+      return;
+    }
+    
+    setSaving(true);
+    setError('');
+    
+    try {
+      let finalSubcategory = formData.subcategory;
+      if (formData.subcategory === '+ Custom' && formData.customSubcategory.trim()) {
+        finalSubcategory = formData.customSubcategory.trim();
+      } else if (formData.subcategory === '+ Custom' && !formData.customSubcategory.trim()) {
+        setError('Please enter a custom subcategory');
+        setSaving(false);
+        return;
+      }
+      
+      await updateTask(task.id, {
+        title: formData.title,
+        category: formData.category,
+        subcategory: finalSubcategory,
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        day: formData.day
+      });
+      
+      onUpdate();
+      onClose();
+    } catch (err) {
+      setError('Failed to update task: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (confirm('Delete this task? This cannot be undone.')) {
+      setSaving(true);
+      try {
+        await deleteTask(task.id);
+        onUpdate();
+        onClose();
+      } catch (err) {
+        setError('Failed to delete task: ' + err.message);
+      } finally {
+        setSaving(false);
+      }
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="w-[500px] max-w-[90vw] bg-slate-900 rounded-2xl border border-white/20 shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-[10005] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
+      <div className="bg-slate-900 rounded-2xl border border-white/20 shadow-2xl overflow-hidden w-full max-w-[500px] max-h-[90vh] overflow-y-auto">
         
-        {/* Header */}
-        <div className="p-5 border-b border-white/10 bg-slate-900/50 sticky top-0 bg-slate-900">
+        <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm p-5 border-b border-white/10">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <Calendar size={20} style={{ color: theme?.primary || '#a855f7' }} />
-              {task ? 'Edit Task' : 'Create New Task'}
+              Edit Task
             </h2>
-            <button onClick={onClose} className="text-slate-400 hover:text-white transition">
+            <button onClick={onClose} className="text-slate-400 hover:text-white transition p-1 rounded">
               <X size={20} />
             </button>
           </div>
+          {task.status === 'active' && (
+            <p className="text-xs text-orange-400 mt-2 flex items-center gap-1">
+              <AlertCircle size={12} />
+              Task is currently active. Time changes will affect your schedule.
+            </p>
+          )}
         </div>
 
         <div className="p-5">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Task Title */}
+          {error && (
+            <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+          
+          <div className="space-y-4">
             <div>
               <label className="block text-sm text-slate-400 mb-2">Task Title *</label>
               <input
                 type="text"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="e.g., Study Mathematics Chapter 5, Complete Project Report..."
+                placeholder="e.g., Study Mathematics Chapter 5"
                 className="w-full p-3 rounded-xl bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none transition"
-                autoFocus
                 required
               />
             </div>
 
-            {/* Day Selection with Past Day Warning */}
             <div>
               <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
                 <Calendar size={14} /> Day
@@ -218,27 +186,14 @@ export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, on
               <select
                 value={formData.day}
                 onChange={(e) => setFormData({ ...formData, day: e.target.value })}
-                className={`w-full p-3 rounded-xl bg-slate-800 border ${
-                  isDayPastValue && !task ? 'border-red-500/50 bg-red-900/20' : 'border-white/10'
-                } text-white text-sm focus:border-purple-500 focus:outline-none transition`}
+                className="w-full p-3 rounded-xl bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
               >
-                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(d => {
-                  const isPast = isDayPast(d);
-                  return (
-                    <option key={d} value={d} disabled={isPast && !task}>
-                      {d} {isPast && !task ? '(Past Day - Cannot Schedule)' : ''}
-                    </option>
-                  );
-                })}
+                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(d => (
+                  <option key={d}>{d}</option>
+                ))}
               </select>
-              {isDayPastValue && !task && (
-                <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                  <AlertCircle size={12} /> This day has already passed. Cannot schedule new tasks.
-                </p>
-              )}
             </div>
 
-            {/* Time Selection with Past Time Warning */}
             <div>
               <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
                 <Clock size={14} /> Time Period
@@ -250,9 +205,7 @@ export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, on
                     type="time"
                     value={formData.startTime}
                     onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
-                    className={`w-full p-3 rounded-xl bg-slate-800 border ${
-                      !task && isTimePast(formData.day, formData.startTime, new Date()) ? 'border-red-500/50 bg-red-900/20' : 'border-white/10'
-                    } text-white text-sm focus:border-purple-500 focus:outline-none transition`}
+                    className="w-full p-3 rounded-xl bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
                   />
                 </div>
                 <div className="flex-1">
@@ -265,14 +218,8 @@ export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, on
                   />
                 </div>
               </div>
-              {timeError && (
-                <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                  <AlertCircle size={12} /> {timeError}
-                </p>
-              )}
             </div>
 
-            {/* Category Selection */}
             <div>
               <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
                 <Tag size={14} /> Category
@@ -300,7 +247,6 @@ export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, on
               </select>
             </div>
 
-            {/* Subcategory Selection with Custom Option */}
             <div>
               <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
                 <Layers size={14} /> Subcategory
@@ -317,7 +263,6 @@ export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, on
                 ))}
               </select>
               
-              {/* Custom Subcategory Input */}
               {showCustomInput && (
                 <div className="mt-2 animate-fade-in">
                   <label className="block text-xs text-purple-400 mb-1 flex items-center gap-1">
@@ -327,21 +272,19 @@ export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, on
                     type="text"
                     value={formData.customSubcategory}
                     onChange={(e) => setFormData({ ...formData, customSubcategory: e.target.value })}
-                    placeholder="e.g., Advanced Calculus, Project Alpha, Team Sync..."
+                    placeholder="e.g., Advanced Calculus, Project Alpha"
                     className="w-full p-2 rounded-lg bg-purple-900/30 border border-purple-500/50 text-white text-sm focus:border-purple-500 focus:outline-none transition"
-                    autoFocus={showCustomInput}
                   />
                 </div>
               )}
             </div>
 
-            {/* Preview */}
             <div className="p-3 rounded-xl bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20">
               <p className="text-xs text-slate-400 mb-2">Task Preview:</p>
-              <p className="text-sm text-white font-medium">
+              <p className="text-sm text-white font-medium break-words">
                 {formData.title || 'Untitled Task'}
               </p>
-              <div className="flex gap-3 mt-2 text-xs flex-wrap">
+              <div className="flex flex-wrap gap-2 mt-2 text-xs">
                 <span className="text-purple-400">{CATEGORIES[formData.category]?.icon} {formData.category}</span>
                 <span className="text-cyan-400">
                   → {formData.subcategory === '+ Custom' ? (formData.customSubcategory || 'Custom') : formData.subcategory}
@@ -350,32 +293,25 @@ export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, on
               </div>
             </div>
 
-            {/* Buttons */}
             <div className="flex gap-3 pt-2">
               <button
-                type="submit"
-                disabled={(!task && isTimePast(formData.day, formData.startTime, new Date())) || isDayPastValue}
-                className={`flex-1 py-3 rounded-xl text-white font-medium flex items-center justify-center gap-2 transition ${
-                  (!task && (isTimePast(formData.day, formData.startTime, new Date()) || isDayPastValue))
-                    ? 'bg-slate-600 cursor-not-allowed opacity-50'
-                    : 'hover:opacity-90'
-                }`}
-                style={{ backgroundColor: (!task && (isTimePast(formData.day, formData.startTime, new Date()) || isDayPastValue)) ? undefined : (theme?.primary || '#a855f7') }}
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 py-3 rounded-xl text-white font-medium flex items-center justify-center gap-2 transition hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: theme?.primary || '#a855f7' }}
               >
-                <Save size={18} />
-                {task ? 'Update Task' : 'Add Task'}
+                {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save size={18} />}
+                {saving ? 'Saving...' : 'Save Changes'}
               </button>
-              {task && (
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  className="px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium transition"
-                >
-                  Delete
-                </button>
-              )}
+              <button
+                onClick={handleDelete}
+                disabled={saving}
+                className="px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium transition disabled:opacity-50"
+              >
+                <Trash2 size={18} />
+              </button>
             </div>
-          </form>
+          </div>
         </div>
       </div>
     </div>

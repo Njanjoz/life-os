@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { WeekView } from './components/WeekView/WeekView';
+import WeekView from './components/WeekView/WeekView';
 import Dashboard from './pages/Dashboard';
 import { Login } from './components/Login/Login';
 import { LayoutDashboard, CalendarDays } from 'lucide-react';

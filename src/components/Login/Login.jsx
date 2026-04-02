@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
-import { LogIn, UserPlus, Brain, Target, Zap, Mail, Lock } from 'lucide-react';
+import { LogIn, Brain, Target, Zap, AlertCircle } from 'lucide-react';
 
-export const Login = ({ onLogin, loading }) => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showGoogleSignIn, setShowGoogleSignIn] = useState(true);
+export const Login = ({ onLogin, loading, error }) => {
+  const [localError, setLocalError] = useState('');
 
-  const handleGoogleSignIn = () => {
-    onLogin();
+  const handleGoogleSignIn = async () => {
+    setLocalError('');
+    try {
+      await onLogin();
+    } catch (err) {
+      setLocalError(err.message || 'Failed to sign in');
+    }
   };
+
+  const displayError = error || localError;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900/20 to-slate-900 flex items-center justify-center p-4">
@@ -32,67 +36,28 @@ export const Login = ({ onLogin, loading }) => {
             </p>
           </div>
           
-          {/* Toggle between Login and Sign Up */}
-          <div className="flex gap-2 mb-6 bg-white/5 rounded-xl p-1">
-            <button
-              onClick={() => setIsLogin(true)}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
-                isLogin ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => setIsLogin(false)}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
-                !isLogin ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Sign Up
-            </button>
-          </div>
+          {displayError && (
+            <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-2">
+              <AlertCircle size={16} />
+              {displayError}
+            </div>
+          )}
           
-          {/* Email/Password Form (Coming Soon) */}
-          <div className="mb-6">
-            <div className="relative mb-4">
-              <Mail size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500" />
-              <input
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:border-purple-500 focus:outline-none transition"
-              />
+          <div className="space-y-4 mb-8">
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
+              <Target size={18} className="text-purple-400" />
+              <span className="text-sm text-slate-300">Track your time with precision</span>
             </div>
-            <div className="relative mb-4">
-              <Lock size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500" />
-              <input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-800/50 border border-white/10 text-white placeholder-slate-500 focus:border-purple-500 focus:outline-none transition"
-              />
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
+              <Zap size={18} className="text-yellow-400" />
+              <span className="text-sm text-slate-300">Real-time task progress visualization</span>
             </div>
-            <button
-              disabled
-              className="w-full py-3 rounded-xl bg-slate-700 text-slate-400 font-medium cursor-not-allowed"
-            >
-              {isLogin ? 'Sign In' : 'Sign Up'} (Coming Soon)
-            </button>
-          </div>
-          
-          {/* Divider */}
-          <div className="relative mb-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-white/10"></div>
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="px-3 bg-transparent text-slate-500">OR</span>
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
+              <Brain size={18} className="text-cyan-400" />
+              <span className="text-sm text-slate-300">AI-powered insights & discipline scoring</span>
             </div>
           </div>
           
-          {/* Google Sign In Button */}
           <button
             onClick={handleGoogleSignIn}
             disabled={loading}
@@ -103,25 +68,13 @@ export const Login = ({ onLogin, loading }) => {
             ) : (
               <>
                 <LogIn size={18} />
-                Continue with Google
+                Sign in with Google
               </>
             )}
           </button>
           
-          <div className="mt-6 text-center">
-            <p className="text-xs text-slate-500">
-              {isLogin ? "Don't have an account? " : "Already have an account? "}
-              <button 
-                onClick={() => setIsLogin(!isLogin)}
-                className="text-purple-400 hover:text-purple-300 transition"
-              >
-                {isLogin ? "Sign up" : "Sign in"}
-              </button>
-            </p>
-          </div>
-          
-          <p className="text-center text-xs text-slate-500 mt-4">
-            By continuing, you agree to track your productivity and improve your time management
+          <p className="text-center text-xs text-slate-500 mt-6">
+            By signing in, you agree to track your productivity and improve your time management
           </p>
         </div>
       </div>

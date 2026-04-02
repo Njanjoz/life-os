@@ -7,7 +7,7 @@ import { LayoutDashboard, CalendarDays } from 'lucide-react';
 import './index.css';
 
 function AppContent() {
-  const { user, loading, signInWithGoogle, logout } = useAuth();
+  const { user, loading, signInWithGoogle, logout, error } = useAuth();
   const [activeTab, setActiveTab] = useState('schedule');
 
   if (loading) {
@@ -22,7 +22,7 @@ function AppContent() {
   }
 
   if (!user) {
-    return <Login onLogin={signInWithGoogle} loading={loading} />;
+    return <Login onLogin={signInWithGoogle} loading={loading} error={error} />;
   }
 
   return (
@@ -43,7 +43,6 @@ function AppContent() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* Tab Navigation */}
             <div className="flex gap-1 bg-white/5 rounded-xl p-1">
               <button
                 onClick={() => setActiveTab('schedule')}

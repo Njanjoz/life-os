@@ -31,6 +31,7 @@ export default function WeekView() {
   const [sortOrder, setSortOrder] = useState('asc');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const isLoadingRef = useRef(false);
 
   const loadWeek = useCallback(async () => {
@@ -40,12 +41,19 @@ export default function WeekView() {
       const currentWeek = await getCurrentWeek(selectedDate);
       setWeek(currentWeek);
       const weekTasks = await getWeekTasks(currentWeek.id);
-      setTasks(weekTasks);
+      // Filter out tasks that are marked as 'rescheduled' (they are replaced by new ones)
+      // Also filter out tasks with status 'rescheduled' or 'rescheduled_with_progress'
+      const activeTasks = weekTasks.filter(t => 
+        t.status !== 'rescheduled' && 
+        t.status !== 'rescheduled_with_progress' &&
+        !t.rescheduledTo
+      );
+      setTasks(activeTasks);
       setMetrics(currentWeek.metrics || {});
       const savedTheme = await getTheme();
       if (savedTheme) setTheme(savedTheme);
       const savedTimeSlots = await getTimeSlots();
-      const taskTimes = [...new Set(weekTasks.map(t => t.startTime))].sort();
+      const taskTimes = [...new Set(activeTasks.map(t => t.startTime))].sort();
       const allSlots = taskTimes.length > 0 ? taskTimes : savedTimeSlots;
       setTimeSlots(allSlots);
       await checkMissedTasks(currentWeek.id, selectedDate);
@@ -61,9 +69,11 @@ export default function WeekView() {
     }
   }, [user, selectedDate]);
 
-  useEffect(() => { if (user) loadWeek(); }, [user, loadWeek]);
+  useEffect(() => { if (user) loadWeek(); }, [user, loadWeek, refreshKey]);
 
-  const handleRefresh = useCallback(async () => { await loadWeek(); }, [loadWeek]);
+  const handleRefresh = useCallback(async () => { 
+    setRefreshKey(prev => prev + 1);
+  }, []);
 
   const changeWeek = (direction) => {
     const newDate = new Date(selectedDate);
@@ -130,7 +140,6 @@ export default function WeekView() {
     await handleRefresh();
   };
 
-  // Reset current week only
   const handleResetWeek = async () => {
     if (confirm('⚠️ WARNING: This will delete ALL tasks for the current week only.\n\nYour settings and other weeks will remain.\n\nThis action cannot be undone.\n\nAre you sure you want to reset this week?')) {
       setResetting(true);
@@ -149,13 +158,11 @@ export default function WeekView() {
     }
   };
 
-  // Reset ALL data (complete fresh start)
   const handleResetAll = async () => {
     if (confirm('⚠️⚠️⚠️ COMPLETE DATA RESET ⚠️⚠️⚠️\n\nThis will DELETE ALL your tasks, schedules, and analytics for EVERY week.\n\nYou will start completely fresh with no data.\n\nThis action CANNOT be undone!\n\nAre you ABSOLUTELY sure?')) {
       setResetting(true);
       try {
         await resetAllUserData();
-        // Reload the page to start fresh
         window.location.reload();
       } catch (error) {
         console.error('Reset all error:', error);
@@ -410,7 +417,17 @@ export default function WeekView() {
                     </div>
                     <div className="p-0.5 w-full">
                       {task ? (
-                        <TaskCell task={task} weekId={week?.id} now={now} selectedDate={date} onUpdate={handleRefresh} theme={theme} isPast={isPast} viewMode={viewMode} />
+                        <TaskCell 
+                          key={`${task.id}_${refreshKey}`}
+                          task={task} 
+                          weekId={week?.id} 
+                          now={now} 
+                          selectedDate={date} 
+                          onUpdate={handleRefresh} 
+                          theme={theme} 
+                          isPast={isPast} 
+                          viewMode={viewMode} 
+                        />
                       ) : canAdd ? (
                         <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-12 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
                           <Plus size={14} className="text-slate-500" />
@@ -461,7 +478,17 @@ export default function WeekView() {
                       return (
                         <div key={`${day}-${time}`} className="p-0.5 w-full" onClick={() => canAdd && handleSlotClick(day, time, date)}>
                           {task ? (
-                            <TaskCell task={task} weekId={week?.id} now={now} selectedDate={date} onUpdate={handleRefresh} theme={theme} isPast={isPast} viewMode={viewMode} />
+                            <TaskCell 
+                              key={`${task.id}_${refreshKey}`}
+                              task={task} 
+                              weekId={week?.id} 
+                              now={now} 
+                              selectedDate={date} 
+                              onUpdate={handleRefresh} 
+                              theme={theme} 
+                              isPast={isPast} 
+                              viewMode={viewMode} 
+                            />
                           ) : canAdd ? (
                             <div className="h-12 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
                               <Plus size={12} className="text-slate-500" />

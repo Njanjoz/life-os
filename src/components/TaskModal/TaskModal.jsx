@@ -1,438 +1,259 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Trash2, Clock, Calendar, Tag, Layers, Edit3, AlertCircle } from 'lucide-react';
-import { updateTask, deleteTask } from '../../services/firebaseTaskService';
-import { useRealTimeClock } from '../../hooks/useRealTimeClock';
+import { X, Clock, Calendar, Tag, AlertCircle } from 'lucide-react';
 
-const CATEGORIES = {
-  'Study': {
-    icon: '📚',
-    subcategories: ['Lecture Review', 'Reading', 'Practice Problems', 'Research', 'Group Study', 'Flashcards', 'Exam Prep', 'Essay Writing', '+ Custom']
-  },
-  'Exam Revision': {
-    icon: '📝',
-    subcategories: ['Past Papers', 'Summary Notes', 'Memory Work', 'Practice Tests', 'Weak Areas', 'Quick Review', '+ Custom']
-  },
-  'Break': {
-    icon: '☕',
-    subcategories: ['Short Break', 'Lunch', 'Walk', 'Meditation', 'Stretch', 'Snack Time', '+ Custom']
-  },
-  'Exercise': {
-    icon: '💪',
-    subcategories: ['Cardio', 'Strength Training', 'Yoga', 'Stretching', 'Walk', 'Sports', '+ Custom']
-  },
-  'Work': {
-    icon: '💼',
-    subcategories: ['Meetings', 'Deep Work', 'Emails', 'Planning', 'Admin', 'Client Work', '+ Custom']
-  },
-  'Personal': {
-    icon: '🧘',
-    subcategories: ['Self Care', 'Family Time', 'Hobby', 'Social', 'Errands', 'Rest', '+ Custom']
-  },
-  'Meeting': {
-    icon: '👥',
-    subcategories: ['1-on-1', 'Team Meeting', 'Client Call', 'Workshop', 'Networking', 'Review', '+ Custom']
-  },
-  'Review': {
-    icon: '🔄',
-    subcategories: ['Daily Review', 'Weekly Planning', 'Progress Check', 'Reflection', 'Adjustments', '+ Custom']
+export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, theme, day, time }) {
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState('Work');
+  const [subcategory, setSubcategory] = useState('');
+  const [taskDay, setTaskDay] = useState(day || getCurrentDay());
+  const [startTime, setStartTime] = useState(time || getCurrentTime());
+  const [endTime, setEndTime] = useState(getDefaultEndTime(time || getCurrentTime()));
+  const [priority, setPriority] = useState('medium');
+  const [notes, setNotes] = useState('');
+
+  // Helper to get current day name
+  function getCurrentDay() {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const today = new Date();
+    const dayIndex = today.getDay();
+    // Convert Sunday (0) to Sunday (6) and Monday (1) to Monday (0)
+    if (dayIndex === 0) return 'Sunday';
+    return days[dayIndex - 1];
   }
-};
 
-// Helper to get the actual date for a given day in the current week
-const getDateForDay = (dayName, weekStartDate) => {
-  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  const startOfWeek = new Date(weekStartDate);
-  const dayIndex = days.indexOf(dayName);
-  const targetDate = new Date(startOfWeek);
-  targetDate.setDate(startOfWeek.getDate() + dayIndex);
-  return targetDate;
-};
+  // Helper to get current time in HH:MM format
+  function getCurrentTime() {
+    const now = new Date();
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    return `${hours}:${minutes}`;
+  }
 
-export const TaskModal = ({ isOpen, onClose, task, day, time, weekId, onSave, onUpdate, theme }) => {
-  const { now, isTimePast, isDayPast } = useRealTimeClock(1000);
-  const [formData, setFormData] = useState({
-    title: '',
-    category: 'Study',
-    subcategory: 'Lecture Review',
-    customSubcategory: '',
-    startTime: '08:00',
-    endTime: '10:00',
-    day: 'Monday'
-  });
-  const [showCustomInput, setShowCustomInput] = useState(false);
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [timeError, setTimeError] = useState('');
+  // Helper to get default end time (1 hour after start)
+  function getDefaultEndTime(start) {
+    const [hours, minutes] = start.split(':').map(Number);
+    const endHours = (hours + 1) % 24;
+    return `${endHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+  }
 
-  // Initialize form data when modal opens
+  // Auto-update end time when start time changes
   useEffect(() => {
-    if (isOpen) {
-      if (task) {
-        // Editing existing task
-        const categoryData = CATEGORIES[task.category];
-        const isCustomSubcategory = categoryData && !categoryData.subcategories.includes(task.subcategory);
-        
-        setFormData({
-          title: task.title || '',
-          category: task.category || 'Study',
-          subcategory: isCustomSubcategory ? '+ Custom' : (task.subcategory || 'Lecture Review'),
-          customSubcategory: isCustomSubcategory ? task.subcategory : '',
-          startTime: task.startTime || '08:00',
-          endTime: task.endTime || '10:00',
-          day: task.day || 'Monday'
-        });
-        setShowCustomInput(isCustomSubcategory);
-      } else if (day && time) {
-        // Adding new task to specific slot
-        setFormData({
-          title: '',
-          category: 'Study',
-          subcategory: 'Lecture Review',
-          customSubcategory: '',
-          startTime: time,
-          endTime: `${parseInt(time.split(':')[0]) + 1}:00`,
-          day: day
-        });
-        setShowCustomInput(false);
-      } else {
-        // Adding new task from add button
-        setFormData({
-          title: '',
-          category: 'Study',
-          subcategory: 'Lecture Review',
-          customSubcategory: '',
-          startTime: '08:00',
-          endTime: '10:00',
-          day: 'Monday'
-        });
-        setShowCustomInput(false);
-      }
-      setError('');
-      setTimeError('');
+    if (!task) {
+      setEndTime(getDefaultEndTime(startTime));
     }
-  }, [isOpen, task, day, time]);
+  }, [startTime, task]);
 
-  // Validate time against current real-time clock
+  // Populate form when editing existing task or creating new
   useEffect(() => {
-    if (!isOpen) return;
-    
-    const selectedDate = getDateForDay(formData.day, new Date());
-    const isTimeInPast = isTimePast(formData.day, formData.startTime, selectedDate);
-    const isDayInPast = isDayPast(formData.day);
-    
-    if (!task && (isTimeInPast || isDayInPast)) {
-      if (isDayInPast) {
-        setTimeError(`Cannot schedule tasks on ${formData.day} - this day has already passed.`);
-      } else if (isTimeInPast) {
-        const currentTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setTimeError(`Cannot schedule tasks at ${formData.startTime} - this time has already passed. Current time is ${currentTime}.`);
-      }
+    if (task) {
+      setTitle(task.title || '');
+      setCategory(task.category || 'Work');
+      setSubcategory(task.subcategory || '');
+      setTaskDay(task.day || getCurrentDay());
+      setStartTime(task.startTime || getCurrentTime());
+      setEndTime(task.endTime || getDefaultEndTime(task.startTime || getCurrentTime()));
+      setPriority(task.priority || 'medium');
+      setNotes(task.notes || '');
     } else {
-      setTimeError('');
+      setTitle('');
+      setCategory('Work');
+      setSubcategory('');
+      setTaskDay(day || getCurrentDay());
+      setStartTime(time || getCurrentTime());
+      setEndTime(getDefaultEndTime(time || getCurrentTime()));
+      setPriority('medium');
+      setNotes('');
     }
-  }, [formData.day, formData.startTime, isOpen, task, now, isTimePast, isDayPast]);
+  }, [task, isOpen, day, time]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    
+    const taskData = {
+      title: title.trim(),
+      category,
+      subcategory: subcategory.trim() || 'General',
+      day: taskDay,
+      startTime,
+      endTime,
+      priority,
+      notes: notes.trim()
+    };
+    
+    if (onSave) {
+      await onSave(taskData);
+    }
+    onClose();
+  };
 
   if (!isOpen) return null;
 
-  const currentCategory = CATEGORIES[formData.category];
-  const availableSubcategories = currentCategory?.subcategories || [];
-
-  const handleSubcategoryChange = (value) => {
-    setFormData({ ...formData, subcategory: value });
-    setShowCustomInput(value === '+ Custom');
-  };
-
-  const handleSave = async () => {
-    // Validate against past time
-    const selectedDate = getDateForDay(formData.day, new Date());
-    const isTimeInPast = isTimePast(formData.day, formData.startTime, selectedDate);
-    const isDayInPast = isDayPast(formData.day);
-    
-    if (!task && (isTimeInPast || isDayInPast)) {
-      setTimeError('Cannot schedule tasks in the past! Please select a future time.');
-      return;
-    }
-    
-    if (formData.startTime >= formData.endTime) {
-      setError('End time must be after start time');
-      return;
-    }
-    
-    if (!formData.title.trim()) {
-      setError('Task title is required');
-      return;
-    }
-    
-    setSaving(true);
-    setError('');
-    
-    try {
-      let finalSubcategory = formData.subcategory;
-      if (formData.subcategory === '+ Custom' && formData.customSubcategory.trim()) {
-        finalSubcategory = formData.customSubcategory.trim();
-      } else if (formData.subcategory === '+ Custom' && !formData.customSubcategory.trim()) {
-        setError('Please enter a custom subcategory');
-        setSaving(false);
-        return;
-      }
-      
-      const taskData = {
-        title: formData.title,
-        category: formData.category,
-        subcategory: finalSubcategory,
-        startTime: formData.startTime,
-        endTime: formData.endTime,
-        day: formData.day
-      };
-      
-      if (onSave) {
-        await onSave(taskData);
-      } else if (task && onUpdate) {
-        await updateTask(task.id, taskData);
-        onUpdate();
-      }
-      
-      onClose();
-    } catch (err) {
-      setError('Failed to save task: ' + err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (task && confirm('Delete this task? This cannot be undone.')) {
-      setSaving(true);
-      try {
-        await deleteTask(task.id);
-        if (onUpdate) onUpdate();
-        onClose();
-      } catch (err) {
-        setError('Failed to delete task: ' + err.message);
-      } finally {
-        setSaving(false);
-      }
-    }
-  };
-
-  // Get current time for display
-  const currentTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const currentDate = now.toLocaleDateString();
+  const categories = ['Work', 'Study', 'Health', 'Personal', 'Social', 'Rest'];
+  const priorities = [
+    { value: 'high', label: 'High', color: 'text-red-400', bg: 'bg-red-600/20', border: 'border-red-500/50' },
+    { value: 'medium', label: 'Medium', color: 'text-yellow-400', bg: 'bg-yellow-600/20', border: 'border-yellow-500/50' },
+    { value: 'low', label: 'Low', color: 'text-green-400', bg: 'bg-green-600/20', border: 'border-green-500/50' }
+  ];
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
   return (
-    <div className="fixed inset-0 z-[10005] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
-      <div className="bg-slate-900 rounded-2xl border border-white/20 shadow-2xl overflow-hidden w-full max-w-[500px] max-h-[90vh] overflow-y-auto">
-        
-        <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm p-5 border-b border-white/10">
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              <Calendar size={20} style={{ color: theme?.primary || '#a855f7' }} />
-              {task ? 'Edit Task' : 'Create New Task'}
-            </h2>
-            <button onClick={onClose} className="text-slate-400 hover:text-white transition p-1 rounded">
-              <X size={20} />
-            </button>
-          </div>
-          
-          {/* Real-time clock display */}
-          <div className="mt-2 text-xs text-slate-500 flex items-center gap-2">
-            <Clock size={10} className="text-purple-400" />
-            <span>Current time: {currentTime} | {currentDate}</span>
-          </div>
-          
-          {task?.status === 'active' && (
-            <p className="text-xs text-orange-400 mt-2 flex items-center gap-1">
-              <AlertCircle size={12} />
-              Task is currently active. Time changes will affect your schedule.
-            </p>
-          )}
+    <div 
+      className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" 
+      style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, margin: 0 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-slate-900 rounded-xl w-full max-w-md border border-white/10 shadow-2xl relative animate-in fade-in zoom-in duration-200" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm z-10 flex items-center justify-between p-4 border-b border-white/10 rounded-t-xl">
+          <h2 className="text-base font-bold text-white">
+            {task ? 'Edit Task' : 'Create New Task'}
+          </h2>
+          <button 
+            onClick={onClose} 
+            className="text-slate-400 hover:text-white transition p-1 rounded hover:bg-white/10"
+          >
+            <X size={18} />
+          </button>
         </div>
-
-        <div className="p-5">
-          {error && (
-            <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-              {error}
-            </div>
-          )}
+        
+        <form onSubmit={handleSubmit} className="p-4 space-y-4">
+          {/* Title */}
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Task Title</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g., Complete React project"
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none transition"
+              autoFocus
+            />
+          </div>
           
-          {timeError && (
-            <div className="mb-4 p-3 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 text-sm flex items-center gap-2">
-              <AlertCircle size={14} />
-              {timeError}
-            </div>
-          )}
-          
-          <div className="space-y-4">
+          {/* Category & Subcategory */}
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm text-slate-400 mb-2">Task Title *</label>
+              <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Category</label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
+              >
+                {categories.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Subcategory</label>
               <input
                 type="text"
-                value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="e.g., Study Mathematics Chapter 5"
-                className="w-full p-3 rounded-xl bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none transition"
-                required
+                value={subcategory}
+                onChange={(e) => setSubcategory(e.target.value)}
+                placeholder="Optional"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
               />
             </div>
-
+          </div>
+          
+          {/* Day & Time */}
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
-                <Calendar size={14} /> Day
+              <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                <Calendar size={10} /> Day
               </label>
               <select
-                value={formData.day}
-                onChange={(e) => setFormData({ ...formData, day: e.target.value })}
-                className={`w-full p-3 rounded-xl bg-slate-800 border ${
-                  !task && isDayPast(formData.day) ? 'border-red-500/50 bg-red-900/20' : 'border-white/10'
-                } text-white text-sm focus:border-purple-500 focus:outline-none`}
+                value={taskDay}
+                onChange={(e) => setTaskDay(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
               >
-                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(d => {
-                  const isPast = isDayPast(d);
-                  return (
-                    <option key={d} value={d} disabled={!task && isPast}>
-                      {d} {!task && isPast ? '(Past Day - Cannot Schedule)' : ''}
-                    </option>
-                  );
-                })}
-              </select>
-              {!task && isDayPast(formData.day) && (
-                <p className="text-xs text-red-400 mt-1">This day has already passed. Please select a future day.</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
-                <Clock size={14} /> Time Period
-              </label>
-              <div className="flex gap-3">
-                <div className="flex-1">
-                  <label className="text-xs text-slate-500 block mb-1">Start Time</label>
-                  <input
-                    type="time"
-                    value={formData.startTime}
-                    onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
-                    className={`w-full p-3 rounded-xl bg-slate-800 border ${
-                      !task && !isDayPast(formData.day) && isTimePast(formData.day, formData.startTime, getDateForDay(formData.day, new Date())) 
-                        ? 'border-red-500/50 bg-red-900/20' 
-                        : 'border-white/10'
-                    } text-white text-sm focus:border-purple-500 focus:outline-none`}
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="text-xs text-slate-500 block mb-1">End Time</label>
-                  <input
-                    type="time"
-                    value={formData.endTime}
-                    onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
-                    className="w-full p-3 rounded-xl bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-              {!task && !isDayPast(formData.day) && isTimePast(formData.day, formData.startTime, getDateForDay(formData.day, new Date())) && (
-                <p className="text-xs text-red-400 mt-1">This time has already passed. Please select a future time.</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
-                <Tag size={14} /> Category
-              </label>
-              <select
-                value={formData.category}
-                onChange={(e) => {
-                  const newCategory = e.target.value;
-                  const newSubcategories = CATEGORIES[newCategory]?.subcategories || [];
-                  setFormData({ 
-                    ...formData, 
-                    category: newCategory,
-                    subcategory: newSubcategories[0] || '',
-                    customSubcategory: ''
-                  });
-                  setShowCustomInput(false);
-                }}
-                className="w-full p-3 rounded-xl bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
-              >
-                {Object.keys(CATEGORIES).map(cat => (
-                  <option key={cat} value={cat}>
-                    {CATEGORIES[cat].icon} {cat}
-                  </option>
+                {days.map(d => (
+                  <option key={d} value={d}>{d}</option>
                 ))}
               </select>
             </div>
-
             <div>
-              <label className="block text-sm text-slate-400 mb-2 flex items-center gap-2">
-                <Layers size={14} /> Subcategory
+              <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                <Clock size={10} /> Start Time
               </label>
-              <select
-                value={formData.subcategory}
-                onChange={(e) => handleSubcategoryChange(e.target.value)}
-                className="w-full p-3 rounded-xl bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
-              >
-                {availableSubcategories.map(sub => (
-                  <option key={sub} value={sub}>
-                    {sub === '+ Custom' ? '✏️ + Add Custom Subcategory' : sub}
-                  </option>
-                ))}
-              </select>
-              
-              {showCustomInput && (
-                <div className="mt-2 animate-fade-in">
-                  <label className="block text-xs text-purple-400 mb-1 flex items-center gap-1">
-                    <Edit3 size={10} /> Enter your custom subcategory
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.customSubcategory}
-                    onChange={(e) => setFormData({ ...formData, customSubcategory: e.target.value })}
-                    placeholder="e.g., Advanced Calculus, Project Alpha"
-                    className="w-full p-2 rounded-lg bg-purple-900/30 border border-purple-500/50 text-white text-sm focus:border-purple-500 focus:outline-none transition"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="p-3 rounded-xl bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20">
-              <p className="text-xs text-slate-400 mb-2">Task Preview:</p>
-              <p className="text-sm text-white font-medium break-words">
-                {formData.title || 'Untitled Task'}
-              </p>
-              <div className="flex flex-wrap gap-2 mt-2 text-xs">
-                <span className="text-purple-400">{CATEGORIES[formData.category]?.icon} {formData.category}</span>
-                <span className="text-cyan-400">
-                  → {formData.subcategory === '+ Custom' ? (formData.customSubcategory || 'Custom') : formData.subcategory}
-                </span>
-                <span className="text-slate-400">{formData.day} • {formData.startTime}-{formData.endTime}</span>
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={handleSave}
-                disabled={saving || (!task && (isDayPast(formData.day) || isTimePast(formData.day, formData.startTime, getDateForDay(formData.day, new Date()))))}
-                className={`flex-1 py-3 rounded-xl text-white font-medium flex items-center justify-center gap-2 transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed`}
-                style={{ 
-                  backgroundColor: (!task && (isDayPast(formData.day) || isTimePast(formData.day, formData.startTime, getDateForDay(formData.day, new Date()))))
-                    ? '#475569' 
-                    : (theme?.primary || '#a855f7')
-                }}
-              >
-                {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Save size={18} />}
-                {saving ? 'Saving...' : (task ? 'Update Task' : 'Add Task')}
-              </button>
-              {task && (
-                <button
-                  onClick={handleDelete}
-                  disabled={saving}
-                  className="px-5 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium transition disabled:opacity-50"
-                >
-                  <Trash2 size={18} />
-                </button>
-              )}
+              <input
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
+              />
             </div>
           </div>
-        </div>
+          
+          {/* End Time */}
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <Clock size={10} /> End Time
+            </label>
+            <input
+              type="time"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
+            />
+            <p className="text-[8px] text-slate-500 mt-1">Default: 1 hour after start</p>
+          </div>
+          
+          {/* Priority */}
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Priority</label>
+            <div className="flex gap-2">
+              {priorities.map(p => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => setPriority(p.value)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${
+                    priority === p.value 
+                      ? `${p.bg} border ${p.border} text-white`
+                      : 'bg-white/10 text-slate-400 hover:bg-white/20'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          {/* Notes */}
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Notes (Optional)</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Add details, subtasks, or reminders..."
+              rows={3}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none resize-none"
+            />
+          </div>
+          
+          {/* Actions */}
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2 rounded-lg bg-white/10 text-white text-sm font-medium hover:bg-white/20 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!title.trim()}
+              className="flex-1 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ backgroundColor: theme?.primary }}
+            >
+              {task ? 'Save Changes' : 'Create Task'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
-};
+}

@@ -23,12 +23,11 @@ export const getStartOfWeek = (date) => {
 };
 
 const calculateMetrics = (tasks) => {
-  // ONLY count base tasks (not rescheduled copies)
   const baseTasks = tasks.filter(t => !t.rescheduledFrom);
   const total = baseTasks.length;
   const completed = baseTasks.filter(t => t.status === 'completed').length;
   const missed = baseTasks.filter(t => t.status === 'missed').length;
-  const rescheduled = baseTasks.filter(t => t.rescheduledTo !== null && t.rescheduledTo !== undefined).length;
+  const rescheduled = baseTasks.filter(t => t.rescheduleReason === 'rescheduled' || t.status === 'missed' && t.rescheduleReason === 'rescheduled').length;
   const overdue = baseTasks.filter(t => t.status === 'pending' && new Date() > new Date(t.endTime)).length;
   
   const completedTasks = baseTasks.filter(t => t.status === 'completed');
@@ -53,10 +52,8 @@ const calculateMetrics = (tasks) => {
   disciplineScore -= Math.min(50, avgDelay / 2);
   disciplineScore = Math.max(0, Math.min(100, disciplineScore));
   
-  // Consistency score
   const consistency = completed > 0 ? (onTimeCount + earlyCount) / completed : 0;
   
-  // Intelligence score
   const intelligenceScore = Math.round(
     (completionRate * 0.25) +
     (avgAccuracy * 0.20) +
@@ -65,18 +62,15 @@ const calculateMetrics = (tasks) => {
     (Math.max(0, 100 - avgDelay * 2) * 0.10)
   );
   
-  // Focus score
   const focusScore = Math.round(
     (completionRate * 0.5) + ((100 - Math.min(100, avgDelay * 2)) * 0.3) + (avgAccuracy * 0.2)
   );
   
-  // Risk score
   const riskScore = Math.min(100, (missed * 12) + (overdue * 8) + (avgDelay * 1.5) + (rescheduled * 5));
   let riskLevel = "Low";
   if (riskScore > 60) riskLevel = "High";
   else if (riskScore > 30) riskLevel = "Medium";
   
-  // Behavior classification
   let behavior = "Balanced";
   if (missed > 3) behavior = "Unstable";
   else if (total > 10 && completionRate < 60) behavior = "Overloaded";
@@ -191,6 +185,14 @@ export const addTask = async (weekId, taskData) => {
     notes: taskData.notes || '',
     rescheduledFrom: taskData.rescheduledFrom || false,
     rescheduledTo: null,
+    originalTaskId: taskData.originalTaskId || null,
+    cumulativeProgress: 0,
+    rescheduleHistory: [],
+    rescheduleCount: 0,
+    carryOverProgress: 0,
+    remainingWork: 100,
+    wasRescheduledFromActive: false,
+    manualProgress: 0,
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now()
   };
@@ -267,6 +269,11 @@ export const completeTask = async (taskId, actualEndTime = null, completionType 
   let accuracy = 100;
   let bonus = 0;
   
+  const cumulativeProgress = task.cumulativeProgress || task.completion || 0;
+  if (cumulativeProgress < 100 && cumulativeProgress > 0) {
+    accuracy -= Math.min(30, (100 - cumulativeProgress) / 2);
+  }
+  
   if (finalCompletionType === 'early') {
     bonus = 15;
     accuracy += bonus;
@@ -304,22 +311,60 @@ export const completeTask = async (taskId, actualEndTime = null, completionType 
   await updateWeekMetrics(task.weekId);
 };
 
-// FIXED: Reschedule without counter - uses copy-based system
-export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, weekId) => {
+// FIXED: RESCHEDULE - ONLY carry over progress if task was ACTUALLY STARTED
+export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, weekId, carriedProgress = null) => {
   const taskRef = doc(db, TASKS_COLLECTION, taskId);
   const taskDoc = await getDoc(taskRef);
   const originalTask = taskDoc.data();
   
   if (!originalTask) throw new Error('Task not found');
   
-  // Mark original as rescheduled (not missed)
+  // CRITICAL FIX: Only carry over progress if task was ACTUALLY started
+  const wasStarted = originalTask.status === 'active' || originalTask.status === 'in_progress';
+  const hasActualStart = originalTask.actualStart !== null;
+  const wasEverStarted = wasStarted && hasActualStart;
+  
+  // Calculate progress to carry - ONLY if task was ever started
+  let currentProgress = 0;
+  if (wasEverStarted) {
+    currentProgress = carriedProgress !== null ? carriedProgress : (originalTask.manualProgress || originalTask.completion || 0);
+  } else {
+    currentProgress = 0; // Task never started - NO progress to carry
+  }
+  
+  // Calculate cumulative progress (only add if there was actual progress)
+  const previousCumulative = originalTask.cumulativeProgress || 0;
+  const newCumulativeProgress = wasEverStarted ? Math.min(100, previousCumulative + currentProgress) : previousCumulative;
+  
+  // Track reschedule history
+  const rescheduleHistory = originalTask.rescheduleHistory || [];
+  rescheduleHistory.push({
+    fromDay: originalTask.day,
+    fromTime: originalTask.startTime,
+    toDay: newDay,
+    toTime: newStartTime,
+    progressAtReschedule: currentProgress,
+    cumulativeAtReschedule: newCumulativeProgress,
+    wasStarted: wasEverStarted,
+    timestamp: new Date().toISOString()
+  });
+  
+  const newRescheduleCount = (originalTask.rescheduleCount || 0) + 1;
+  
+  // Mark original task as rescheduled
   await updateDoc(taskRef, {
     status: 'rescheduled',
     rescheduledTo: `${newDay} at ${newStartTime}`,
+    rescheduledDate: Timestamp.now(),
+    rescheduleCount: newRescheduleCount,
+    completed: false,
+    progressAtReschedule: currentProgress,
+    cumulativeProgress: newCumulativeProgress,
+    wasStartedBeforeReschedule: wasEverStarted,
     updatedAt: Timestamp.now()
   });
   
-  // Create new task copy WITHOUT any reschedule count
+  // Create NEW task with cumulative progress (only if was started)
   const newTaskId = `${originalTask.weekId}_${newDay}_${newStartTime}_${Date.now()}`;
   const newTaskRef = doc(db, TASKS_COLLECTION, newTaskId);
   
@@ -335,6 +380,7 @@ export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, w
     endTime: newEndTime,
     status: 'pending',
     completion: 0,
+    manualProgress: 0,
     actualStart: null,
     actualEnd: null,
     delay: 0,
@@ -344,14 +390,21 @@ export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, w
     bonus: 0,
     priority: originalTask.priority,
     notes: originalTask.notes,
-    rescheduledFrom: true,  // Mark as copy
+    rescheduledFrom: true,
     rescheduledTo: null,
     originalTaskId: taskId,
+    cumulativeProgress: newCumulativeProgress,
+    rescheduleHistory: rescheduleHistory,
+    rescheduleCount: newRescheduleCount,
+    carryOverProgress: wasEverStarted ? currentProgress : 0,
+    remainingWork: wasEverStarted ? 100 - newCumulativeProgress : 100,
+    wasRescheduledFromActive: wasEverStarted,
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now()
   });
   
   await updateWeekMetrics(originalTask.weekId);
+  return newTaskId;
 };
 
 export const rescheduleToNow = async (taskId, weekId) => {
@@ -362,7 +415,7 @@ export const rescheduleToNow = async (taskId, weekId) => {
   const newEndTime = `${(currentHour + 1).toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`;
   const currentDay = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()];
   
-  await rescheduleTask(taskId, currentDay, newStartTime, newEndTime, weekId);
+  return await rescheduleTask(taskId, currentDay, newStartTime, newEndTime, weekId);
 };
 
 export const deleteTask = async (taskId) => {
@@ -396,6 +449,7 @@ export const checkMissedTasks = async (weekId, selectedDate) => {
       if (now > endTime) {
         await updateDoc(doc(db, TASKS_COLLECTION, task.id), {
           status: 'missed',
+          missedReason: 'overdue',
           updatedAt: Timestamp.now()
         });
         updated = true;
@@ -452,7 +506,6 @@ export const updateTimeSlots = async (timeSlots) => {
   return timeSlots;
 };
 
-// Reset functions
 export const deleteAllTasksForWeek = async (weekId) => {
   const tasks = await getWeekTasks(weekId);
   const batch = writeBatch(db);

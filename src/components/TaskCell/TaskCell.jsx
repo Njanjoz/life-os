@@ -75,14 +75,17 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const isRescheduledCopy = localTask?.rescheduledFrom === true;
   const canEdit = localTask?.status === 'pending' && !isRescheduledOriginal && !localTask?.rescheduledTo;
 
+  // FIXED: Only allow starting if status is 'pending' (not 'rescheduled')
   const handleStart = useCallback(async () => {
     if (isStarting) return;
 
-    if (!isPast && localTask && (localTask.status === 'pending' || localTask.status === 'rescheduled')) {
+    if (!isPast && localTask && localTask.status === 'pending') {
       setIsStarting(true);
       try {
         const exactStartTime = new Date();
+        console.log("Starting task:", localTask.id, "at", exactStartTime);
         await startTask(localTask.id, exactStartTime);
+        console.log("Task started successfully, status should be 'active'");
         onUpdate();
         setIsExpanded(false);
       } catch (error) {
@@ -102,23 +105,20 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     const [endHour, endMin] = localTask.endTime.split(':').map(Number);
     scheduledEnd.setHours(endHour, endMin, 0, 0);
     
-    const totalPlannedDuration = (scheduledEnd - start) / 60000; // in minutes
+    const totalPlannedDuration = (scheduledEnd - start) / 60000;
     const actualDuration = (actualEnd - start) / 60000;
     
-    // Calculate how much faster (if early) or slower (if late)
     let speedPercent = 0;
     let speedMessage = '';
     
     if (actualEnd < scheduledEnd) {
-      // Early completion - calculate how much faster
       const timeSaved = totalPlannedDuration - actualDuration;
       speedPercent = Math.round((timeSaved / totalPlannedDuration) * 100);
-      speedMessage = `⚡ You finished ${speedPercent}% faster than expected!`;
+      speedMessage = `You finished ${speedPercent}% faster than expected!`;
     } else if (actualEnd > scheduledEnd) {
-      // Late completion - calculate how much slower
       const timeLost = actualDuration - totalPlannedDuration;
       speedPercent = Math.round((timeLost / totalPlannedDuration) * 100);
-      speedMessage = `🐢 You took ${speedPercent}% longer than expected.`;
+      speedMessage = `You took ${speedPercent}% longer than expected.`;
     }
     
     const diffMinutes = (actualEnd - scheduledEnd) / 60000;
@@ -131,23 +131,22 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
       type = 'early';
       const earlyMinutes = Math.round((scheduledEnd - actualEnd) / 60000);
       bonus = 15;
-      message = `🎉 EARLY COMPLETION!\n\n${speedMessage}\n\nFinished ${earlyMinutes} minutes before scheduled end.\nYou earned +${bonus} bonus points!\n\nProceed with completion?`;
+      message = `EARLY COMPLETION!\n\n${speedMessage}\n\nFinished ${earlyMinutes} minutes before scheduled end.\nYou earned +${bonus} bonus points!\n\nProceed with completion?`;
       color = 'text-green-400';
     } else if (actualEnd >= scheduledEnd && actualEnd <= new Date(scheduledEnd.getTime() + 5 * 60 * 1000)) {
       type = 'on_time';
       bonus = 10;
-      message = `✓ ON TIME COMPLETION\n\nYou finished within the allowed window.\nStandard reward of +${bonus} points applied.\n\nProceed with completion?`;
+      message = `ON TIME COMPLETION\n\nYou finished within the allowed window.\nStandard reward of +${bonus} points applied.\n\nProceed with completion?`;
       color = 'text-blue-400';
     } else {
       type = 'late';
       const lateMinutes = Math.round(diffMinutes);
       const penalty = Math.min(30, lateMinutes * 2);
       bonus = -penalty;
-      message = `⚠️ LATE COMPLETION\n\n${speedMessage}\n\nFinished ${lateMinutes} minutes after scheduled end.\nPenalty of -${penalty} points will be applied.\n\nProceed anyway?`;
+      message = `LATE COMPLETION\n\n${speedMessage}\n\nFinished ${lateMinutes} minutes after scheduled end.\nPenalty of -${penalty} points will be applied.\n\nProceed anyway?`;
       color = 'text-orange-400';
     }
     
-    // Add delay info if started late
     if (localTask.delay > 0) {
       message += `\n\nNote: You started ${Math.round(localTask.delay)} minutes late, which also affects your score.`;
     }

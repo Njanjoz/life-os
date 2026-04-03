@@ -22,69 +22,91 @@ export const getStartOfWeek = (date) => {
   return d;
 };
 
-const GRACE_PERIOD_MS = 5 * 60 * 1000;
-
-export const determineCompletionStatus = (scheduledStart, scheduledEnd, actualStart, actualEnd, taskStatus) => {
-  if (taskStatus === 'missed') return 'missed';
-  if (!actualEnd) {
-    const now = new Date();
-    if (now > scheduledEnd) return 'overdue';
-    return 'pending';
-  }
-  const isStartedOnTime = actualStart <= scheduledStart;
-  const isCompletedOnTime = actualEnd <= scheduledEnd;
-  if (isStartedOnTime && isCompletedOnTime) return 'completed_on_time';
-  if (actualStart < scheduledStart && actualEnd < scheduledEnd) return 'completed_early';
-  if (actualStart > scheduledStart || actualEnd > scheduledEnd) return 'completed_late';
-  return 'completed';
-};
-
 const calculateMetrics = (tasks) => {
-  const total = tasks.length;
-  const completedOnTime = tasks.filter(t => t.completionStatus === 'completed_on_time').length;
-  const completedEarly = tasks.filter(t => t.completionStatus === 'completed_early').length;
-  const completedLate = tasks.filter(t => t.completionStatus === 'completed_late').length;
-  const overdue = tasks.filter(t => t.completionStatus === 'overdue' && t.status !== 'completed').length;
-  const missed = tasks.filter(t => t.status === 'missed').length;
-  const totalReschedules = tasks.reduce((sum, t) => sum + (t.rescheduleCount || 0), 0);
-  const totalDelay = tasks.reduce((sum, t) => sum + Math.max(0, t.delay || 0), 0);
-  const avgDelay = totalDelay / (tasks.filter(t => t.delay > 0).length || 1);
-  const dishonestCount = tasks.filter(t => t.completionType === 'manual_dishonest').length;
+  // ONLY count base tasks (not rescheduled copies)
+  const baseTasks = tasks.filter(t => !t.rescheduledFrom);
+  const total = baseTasks.length;
+  const completed = baseTasks.filter(t => t.status === 'completed').length;
+  const missed = baseTasks.filter(t => t.status === 'missed').length;
+  const rescheduled = baseTasks.filter(t => t.rescheduledTo !== null && t.rescheduledTo !== undefined).length;
+  const overdue = baseTasks.filter(t => t.status === 'pending' && new Date() > new Date(t.endTime)).length;
   
-  const completedTasks = tasks.filter(t => t.status === 'completed');
+  const completedTasks = baseTasks.filter(t => t.status === 'completed');
+  const earlyCount = completedTasks.filter(t => t.completionType === 'early' || t.completionStatus === 'completed_early').length;
+  const onTimeCount = completedTasks.filter(t => t.completionType === 'on_time' || t.completionStatus === 'completed_on_time').length;
+  const lateCount = completedTasks.filter(t => t.completionType === 'late' || t.completionStatus === 'completed_late').length;
+  
+  const totalDelay = baseTasks.reduce((sum, t) => sum + Math.max(0, t.delay || 0), 0);
+  const avgDelay = totalDelay / (baseTasks.filter(t => t.delay > 0).length || 1);
+  
   const avgAccuracy = completedTasks.length > 0 
     ? completedTasks.reduce((sum, t) => sum + (t.accuracy || 0), 0) / completedTasks.length
     : 100;
   
-  const completionRate = total > 0 ? ((completedOnTime + completedEarly + completedLate) / total) * 100 : 0;
+  const completionRate = total > 0 ? (completed / total) * 100 : 0;
   
   let disciplineScore = 100;
-  disciplineScore -= totalReschedules * 2;
+  disciplineScore -= rescheduled * 2;
   disciplineScore -= missed * 10;
-  disciplineScore -= completedLate * 5;
+  disciplineScore -= lateCount * 5;
   disciplineScore -= overdue * 8;
   disciplineScore -= Math.min(50, avgDelay / 2);
-  disciplineScore -= dishonestCount * 15;
   disciplineScore = Math.max(0, Math.min(100, disciplineScore));
   
-  const weeklyScore = (completionRate * 0.3) + (disciplineScore * 0.3) + (avgAccuracy * 0.2) + ((completedEarly / (completedTasks.length || 1)) * 20);
+  // Consistency score
+  const consistency = completed > 0 ? (onTimeCount + earlyCount) / completed : 0;
+  
+  // Intelligence score
+  const intelligenceScore = Math.round(
+    (completionRate * 0.25) +
+    (avgAccuracy * 0.20) +
+    (disciplineScore * 0.25) +
+    (consistency * 100 * 0.20) +
+    (Math.max(0, 100 - avgDelay * 2) * 0.10)
+  );
+  
+  // Focus score
+  const focusScore = Math.round(
+    (completionRate * 0.5) + ((100 - Math.min(100, avgDelay * 2)) * 0.3) + (avgAccuracy * 0.2)
+  );
+  
+  // Risk score
+  const riskScore = Math.min(100, (missed * 12) + (overdue * 8) + (avgDelay * 1.5) + (rescheduled * 5));
+  let riskLevel = "Low";
+  if (riskScore > 60) riskLevel = "High";
+  else if (riskScore > 30) riskLevel = "Medium";
+  
+  // Behavior classification
+  let behavior = "Balanced";
+  if (missed > 3) behavior = "Unstable";
+  else if (total > 10 && completionRate < 60) behavior = "Overloaded";
+  else if (avgDelay > 15) behavior = "Delayed Execution";
+  else if (consistency > 0.85) behavior = "Highly Disciplined";
+  else if (consistency > 0.7) behavior = "Stable Performer";
+  
+  const weeklyScore = Math.round((completionRate * 0.4) + (disciplineScore * 0.4) + (avgAccuracy * 0.2));
   
   return {
-    completedTasks: completedOnTime + completedEarly + completedLate,
+    completedTasks: completed,
     totalTasks: total,
-    completionRate: Math.round(completionRate * 10) / 10,
-    disciplineScore: Math.round(disciplineScore * 10) / 10,
-    timeAccuracy: Math.round(avgAccuracy * 10) / 10,
-    weeklyScore: Math.round(weeklyScore * 10) / 10,
+    completionRate: Math.round(completionRate),
+    disciplineScore: Math.round(disciplineScore),
+    timeAccuracy: Math.round(avgAccuracy),
+    weeklyScore,
     missedCount: missed,
-    totalReschedules: totalReschedules,
-    avgDelay: Math.round(avgDelay * 10) / 10,
+    totalReschedules: rescheduled,
+    avgDelay: Math.round(avgDelay),
     totalDelay: Math.round(totalDelay),
-    dishonestCount: dishonestCount,
-    completedOnTime: completedOnTime,
-    completedEarly: completedEarly,
-    completedLate: completedLate,
-    overdue: overdue
+    earlyCount,
+    onTimeCount,
+    lateCount,
+    overdue,
+    intelligenceScore,
+    focusScore,
+    consistency: Math.round(consistency * 100),
+    behavior,
+    riskScore: Math.round(riskScore),
+    riskLevel
   };
 };
 
@@ -115,11 +137,16 @@ export const getCurrentWeek = async (selectedDate = new Date()) => {
         totalReschedules: 0,
         avgDelay: 0,
         totalDelay: 0,
-        dishonestCount: 0,
-        completedOnTime: 0,
-        completedEarly: 0,
-        completedLate: 0,
-        overdue: 0
+        earlyCount: 0,
+        onTimeCount: 0,
+        lateCount: 0,
+        overdue: 0,
+        intelligenceScore: 0,
+        focusScore: 0,
+        consistency: 0,
+        behavior: "Balanced",
+        riskScore: 0,
+        riskLevel: "Low"
       }
     };
     await setDoc(weekRef, weekData);
@@ -152,9 +179,7 @@ export const addTask = async (weekId, taskData) => {
     startTime: taskData.startTime,
     endTime: taskData.endTime,
     status: 'pending',
-    completionStatus: 'pending',
     completion: 0,
-    rescheduleCount: taskData.rescheduleCount || 0,
     actualStart: null,
     actualEnd: null,
     delay: 0,
@@ -164,6 +189,8 @@ export const addTask = async (weekId, taskData) => {
     bonus: 0,
     priority: taskData.priority || 'medium',
     notes: taskData.notes || '',
+    rescheduledFrom: taskData.rescheduledFrom || false,
+    rescheduledTo: null,
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now()
   };
@@ -229,10 +256,8 @@ export const completeTask = async (taskId, actualEndTime = null, completionType 
   
   let finalCompletionType = completionType;
   if (!finalCompletionType) {
-    const isStartedOnTime = actualStart <= plannedStart;
-    const isCompletedOnTime = actualEnd <= scheduledEnd;
-    if (isStartedOnTime && isCompletedOnTime) finalCompletionType = 'on_time';
-    else if (actualStart < plannedStart && actualEnd < scheduledEnd) finalCompletionType = 'early';
+    if (actualEnd < scheduledEnd) finalCompletionType = 'early';
+    else if (actualEnd <= new Date(scheduledEnd.getTime() + 5 * 60 * 1000)) finalCompletionType = 'on_time';
     else finalCompletionType = 'late';
   }
   
@@ -250,27 +275,23 @@ export const completeTask = async (taskId, actualEndTime = null, completionType 
     accuracy += bonus;
   } else if (finalCompletionType === 'late') {
     const lateMinutes = Math.max(0, (actualEnd - scheduledEnd) / 60000);
-    const penalty = Math.min(30, lateMinutes * 2);
-    accuracy -= penalty;
+    accuracy -= Math.min(30, lateMinutes * 2);
   }
   
   if (actualDuration > plannedDuration) {
-    const overtime = actualDuration - plannedDuration;
-    accuracy -= Math.min(40, overtime * 4);
+    accuracy -= Math.min(40, (actualDuration - plannedDuration) * 4);
   } else if (actualDuration < plannedDuration) {
-    const earlyFinish = plannedDuration - actualDuration;
-    accuracy += Math.min(20, earlyFinish * 2);
+    accuracy += Math.min(20, (plannedDuration - actualDuration) * 2);
   }
   
   if (task.delay > 0) {
     accuracy -= Math.min(40, task.delay / 2);
   }
   
-  accuracy = Math.max(0, Math.min(100, Math.round(accuracy * 10) / 10));
+  accuracy = Math.max(0, Math.min(100, Math.round(accuracy)));
   
   await updateDoc(taskRef, {
     status: 'completed',
-    completionStatus: finalCompletionType === 'early' ? 'completed_early' : finalCompletionType === 'on_time' ? 'completed_on_time' : 'completed_late',
     completion: 100,
     actualEnd: Timestamp.fromDate(actualEnd),
     accuracy: accuracy,
@@ -283,73 +304,65 @@ export const completeTask = async (taskId, actualEndTime = null, completionType 
   await updateWeekMetrics(task.weekId);
 };
 
-export const markTaskOverdue = async (taskId) => {
+// FIXED: Reschedule without counter - uses copy-based system
+export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, weekId) => {
   const taskRef = doc(db, TASKS_COLLECTION, taskId);
   const taskDoc = await getDoc(taskRef);
-  const task = taskDoc.data();
+  const originalTask = taskDoc.data();
   
-  if (task && task.status === 'pending') {
-    await updateDoc(taskRef, {
-      completionStatus: 'overdue',
-      updatedAt: Timestamp.now()
-    });
-    await updateWeekMetrics(task.weekId);
-  }
-};
-
-export const markTaskMissed = async (taskId) => {
-  const taskRef = doc(db, TASKS_COLLECTION, taskId);
+  if (!originalTask) throw new Error('Task not found');
+  
+  // Mark original as rescheduled (not missed)
   await updateDoc(taskRef, {
-    status: 'missed',
-    completionStatus: 'missed',
-    completion: 0,
-    accuracy: 0,
+    status: 'rescheduled',
+    rescheduledTo: `${newDay} at ${newStartTime}`,
     updatedAt: Timestamp.now()
   });
-  const taskDoc = await getDoc(taskRef);
-  const task = taskDoc.data();
-  if (task && task.weekId) await updateWeekMetrics(task.weekId);
-};
-
-export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime) => {
-  const taskRef = doc(db, TASKS_COLLECTION, taskId);
-  const taskDoc = await getDoc(taskRef);
-  const task = taskDoc.data();
   
-  await updateDoc(taskRef, {
+  // Create new task copy WITHOUT any reschedule count
+  const newTaskId = `${originalTask.weekId}_${newDay}_${newStartTime}_${Date.now()}`;
+  const newTaskRef = doc(db, TASKS_COLLECTION, newTaskId);
+  
+  await setDoc(newTaskRef, {
+    id: newTaskId,
+    userId: originalTask.userId,
+    weekId: originalTask.weekId,
+    title: originalTask.title,
+    category: originalTask.category,
+    subcategory: originalTask.subcategory,
     day: newDay,
     startTime: newStartTime,
     endTime: newEndTime,
-    rescheduleCount: (task.rescheduleCount || 0) + 1,
-    status: 'rescheduled',
-    completionStatus: 'rescheduled',
+    status: 'pending',
+    completion: 0,
+    actualStart: null,
+    actualEnd: null,
+    delay: 0,
+    accuracy: 0,
+    timeSpent: 0,
+    completionType: null,
+    bonus: 0,
+    priority: originalTask.priority,
+    notes: originalTask.notes,
+    rescheduledFrom: true,  // Mark as copy
+    rescheduledTo: null,
+    originalTaskId: taskId,
+    createdAt: Timestamp.now(),
     updatedAt: Timestamp.now()
   });
   
-  await updateWeekMetrics(task.weekId);
+  await updateWeekMetrics(originalTask.weekId);
 };
 
-export const rescheduleToNow = async (taskId) => {
+export const rescheduleToNow = async (taskId, weekId) => {
   const now = new Date();
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
   const newStartTime = `${currentHour.toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`;
   const newEndTime = `${(currentHour + 1).toString().padStart(2, '0')}:${currentMinute.toString().padStart(2, '0')}`;
+  const currentDay = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()];
   
-  const taskRef = doc(db, TASKS_COLLECTION, taskId);
-  const taskDoc = await getDoc(taskRef);
-  const task = taskDoc.data();
-  
-  await updateDoc(taskRef, {
-    startTime: newStartTime,
-    endTime: newEndTime,
-    rescheduleCount: (task.rescheduleCount || 0) + 1,
-    status: 'rescheduled',
-    completionStatus: 'rescheduled',
-    updatedAt: Timestamp.now()
-  });
-  
-  await updateWeekMetrics(task.weekId);
+  await rescheduleTask(taskId, currentDay, newStartTime, newEndTime, weekId);
 };
 
 export const deleteTask = async (taskId) => {
@@ -374,18 +387,17 @@ export const checkMissedTasks = async (weekId, selectedDate) => {
   let updated = false;
   
   for (const task of tasks) {
-    if (task.status === 'pending' && task.title) {
+    if (task.status === 'pending' && task.title && !task.rescheduledFrom) {
       const [endHour, endMin] = task.endTime.split(':').map(Number);
       const taskDate = new Date(selectedDate);
       const endTime = new Date(taskDate);
       endTime.setHours(endHour, endMin, 0, 0);
       
       if (now > endTime) {
-        if (now > new Date(endTime.getTime() + 24 * 60 * 60 * 1000)) {
-          await markTaskMissed(task.id);
-        } else {
-          await markTaskOverdue(task.id);
-        }
+        await updateDoc(doc(db, TASKS_COLLECTION, task.id), {
+          status: 'missed',
+          updatedAt: Timestamp.now()
+        });
         updated = true;
       }
     }
@@ -440,11 +452,9 @@ export const updateTimeSlots = async (timeSlots) => {
   return timeSlots;
 };
 
-// NEW RESET FUNCTIONS
+// Reset functions
 export const deleteAllTasksForWeek = async (weekId) => {
-  const userId = getUserId();
   const tasks = await getWeekTasks(weekId);
-  
   const batch = writeBatch(db);
   for (const task of tasks) {
     const taskRef = doc(db, TASKS_COLLECTION, task.id);
@@ -465,11 +475,16 @@ export const deleteAllTasksForWeek = async (weekId) => {
       totalReschedules: 0,
       avgDelay: 0,
       totalDelay: 0,
-      dishonestCount: 0,
-      completedOnTime: 0,
-      completedEarly: 0,
-      completedLate: 0,
-      overdue: 0
+      earlyCount: 0,
+      onTimeCount: 0,
+      lateCount: 0,
+      overdue: 0,
+      intelligenceScore: 0,
+      focusScore: 0,
+      consistency: 0,
+      behavior: "Balanced",
+      riskScore: 0,
+      riskLevel: "Low"
     },
     updatedAt: Timestamp.now()
   });

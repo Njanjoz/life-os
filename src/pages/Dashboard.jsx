@@ -3,12 +3,13 @@ import { getCurrentWeek, getWeekTasks, updateWeekMetrics, getBestFocusHours } fr
 import { calculateTaskAnalytics } from '../services/analyticsService';
 import { useAuth } from '../context/AuthContext';
 import { useCurrentTime } from '../hooks/useCurrentTime';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, LineChart, Line, ComposedChart } from 'recharts';
 import { 
   TrendingUp, Target, Zap, Clock, Award, Calendar, 
   ChevronLeft, ChevronRight, AlertTriangle, CheckCircle, XCircle, 
   Activity, Battery, Cpu, Brain, Sparkles, RotateCcw, AlertOctagon, 
-  Eye, List, LayoutGrid
+  Eye, List, LayoutGrid, Flame, TrendingDown, BarChart3, LineChart as LineChartIcon,
+  Shield, Gauge, Radar
 } from 'lucide-react';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -34,15 +35,14 @@ const Dashboard = () => {
       const weekTasks = await getWeekTasks(currentWeek.id);
       setTasks(weekTasks);
       
-      // Use unified analytics engine
+      // Use intelligent analytics engine
       const analytics = calculateTaskAnalytics(weekTasks);
       setMetrics(analytics);
       
       const hours = await getBestFocusHours();
       setBestHours(hours);
       
-      // Debug log to verify numbers
-      console.log('Analytics:', analytics);
+      console.log('Intelligent Analytics:', analytics);
     } catch (error) {
       console.error('Load dashboard error:', error);
     } finally {
@@ -79,7 +79,12 @@ const Dashboard = () => {
   const getDayStats = (day) => {
     const dayTasks = tasks.filter(t => t.day === day);
     const analytics = calculateTaskAnalytics(dayTasks);
-    return analytics;
+    const dayScore = Math.round(
+      analytics.completionRate * 0.4 +
+      analytics.avgAccuracy * 0.3 +
+      (100 - analytics.avgDelay) * 0.3
+    );
+    return { ...analytics, dayScore };
   };
 
   const weeklyChartData = days.map(day => {
@@ -90,7 +95,10 @@ const Dashboard = () => {
       missed: stats.missedTasks,
       overdue: stats.overdueTasks,
       rescheduled: stats.rescheduledTasks,
-      tasks: stats.totalTasks
+      tasks: stats.totalTasks,
+      delay: stats.avgDelay,
+      accuracy: stats.avgAccuracy,
+      riskScore: stats.riskScore
     };
   }).filter(d => d.tasks > 0);
 
@@ -111,18 +119,26 @@ const Dashboard = () => {
     return (
       <div className="flex justify-center items-center h-96">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-purple-500 border-t-transparent"></div>
-        <p className="ml-2 text-xs text-slate-400">Loading analytics...</p>
+        <p className="ml-2 text-xs text-slate-400">Loading intelligent analytics...</p>
       </div>
     );
   }
 
-  // Verification that totals add up
-  const totalFromPie = (metrics.completedTasks || 0) + (metrics.missedTasks || 0) + (metrics.overdueTasks || 0) + (metrics.rescheduledTasks || 0);
-  const totalsMatch = totalFromPie === metrics.totalTasks;
+  const getRiskColor = () => {
+    if (metrics.riskLevel === 'High') return 'text-red-400';
+    if (metrics.riskLevel === 'Medium') return 'text-yellow-400';
+    return 'text-green-400';
+  };
+
+  const getRiskBg = () => {
+    if (metrics.riskLevel === 'High') return 'bg-red-500/20 border-red-500/30';
+    if (metrics.riskLevel === 'Medium') return 'bg-yellow-500/20 border-yellow-500/30';
+    return 'bg-green-500/20 border-green-500/30';
+  };
 
   return (
     <div className="space-y-4 pb-20">
-      {/* Header with Toggle */}
+      {/* Header */}
       <div className="bg-white/5 backdrop-blur-xl rounded-xl p-3 border border-white/10">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex gap-1">
@@ -136,50 +152,62 @@ const Dashboard = () => {
             </div>
           </div>
           <div className="flex gap-1">
-            <button 
-              onClick={() => setViewMode('week')} 
-              className={`p-1.5 rounded-lg transition ${viewMode === 'week' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}
-            >
+            <button onClick={() => setViewMode('week')} className={`p-1.5 rounded-lg transition ${viewMode === 'week' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
               <LayoutGrid size={14} />
             </button>
-            <button 
-              onClick={() => setViewMode('day')} 
-              className={`p-1.5 rounded-lg transition ${viewMode === 'day' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}
-            >
+            <button onClick={() => setViewMode('day')} className={`p-1.5 rounded-lg transition ${viewMode === 'day' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
               <List size={14} />
             </button>
           </div>
         </div>
       </div>
 
-      {/* AI Insight */}
+      {/* Intelligent AI Insight */}
       <div className="bg-gradient-to-r from-purple-500/15 to-blue-500/15 rounded-xl p-3 border border-purple-500/20">
         <div className="flex items-start gap-2">
           <Brain size={14} className="text-purple-400 mt-0.5" />
           <div className="flex-1">
-            <p className="text-[10px] text-purple-400 font-semibold">AI INSIGHT</p>
-            <p className="text-[11px] text-white leading-tight">
-              {metrics.weeklyScore >= 85 ? "Outstanding week! Your time discipline is elite." :
-               metrics.weeklyScore >= 70 ? "Great progress! Focus on starting tasks on time." :
-               metrics.weeklyScore >= 55 ? "Solid effort. Small improvements will boost your score." :
-               "Delays and overdue tasks are affecting your score."}
-            </p>
-            {bestHours.length > 0 && (
-              <p className="text-[9px] text-cyan-400 mt-1">Peak focus: {bestHours[0]?.hour}:00 ({Math.round(bestHours[0]?.score)}% accuracy)</p>
-            )}
+            <p className="text-[10px] text-purple-400 font-semibold">AI INTELLIGENCE</p>
+            <p className="text-[11px] text-white leading-tight">{metrics.aiInsight || "Analyzing your patterns..."}</p>
+            <div className="flex flex-wrap gap-2 mt-2">
+              <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400">Behavior: {metrics.behavior}</span>
+              <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400">Focus Score: {metrics.focusScore}%</span>
+              <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-orange-500/20 text-orange-400">Consistency: {metrics.consistency}%</span>
+            </div>
           </div>
           <Sparkles size={14} className="text-yellow-500" />
         </div>
+      </div>
+
+      {/* Risk Prediction Card */}
+      <div className={`rounded-xl p-3 border ${getRiskBg()}`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Shield size={14} className={getRiskColor()} />
+            <span className="text-[10px] font-semibold text-white">Risk Prediction</span>
+          </div>
+          <span className={`text-xs font-bold ${getRiskColor()}`}>{metrics.riskLevel} Risk</span>
+        </div>
+        <p className="text-[9px] text-slate-300 mt-1">Risk Score: {metrics.riskScore}%</p>
+        <div className="w-full h-1 bg-white/10 rounded-full mt-2 overflow-hidden">
+          <div className={`h-full rounded-full ${metrics.riskLevel === 'High' ? 'bg-red-500' : metrics.riskLevel === 'Medium' ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${metrics.riskScore}%` }} />
+        </div>
+        {metrics.burnoutRisk && (
+          <p className="text-[8px] text-red-400 mt-2 flex items-center gap-1">
+            <AlertTriangle size={10} /> Burnout risk detected - Consider taking breaks
+          </p>
+        )}
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 gap-2">
         <div className="bg-gradient-to-br from-purple-900/30 to-slate-900 rounded-xl p-3 border border-purple-500/30">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] text-slate-400 uppercase">Weekly Score</span>
+            <span className="text-[9px] text-slate-400 uppercase">Intelligence Score</span>
             <Award size={12} className="text-yellow-500" />
           </div>
-          <p className="text-2xl font-bold text-white">{metrics.weeklyScore || 0}</p>
+          <p className="text-2xl font-bold text-white">{metrics.intelligenceScore || 0}</p>
+          <p className="text-[7px] text-slate-500 mt-1">Overall AI rating</p>
         </div>
         <div className="bg-gradient-to-br from-green-900/30 to-slate-900 rounded-xl p-3 border border-green-500/30">
           <div className="flex items-center justify-between mb-1">
@@ -198,10 +226,10 @@ const Dashboard = () => {
         </div>
         <div className="bg-gradient-to-br from-orange-900/30 to-slate-900 rounded-xl p-3 border border-orange-500/30">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] text-slate-400 uppercase">Avg Delay</span>
-            <Clock size={12} className="text-orange-400" />
+            <span className="text-[9px] text-slate-400 uppercase">Focus Score</span>
+            <Flame size={12} className="text-orange-400" />
           </div>
-          <p className="text-2xl font-bold text-white">{metrics.avgDelay || 0}<span className="text-xs">min</span></p>
+          <p className="text-2xl font-bold text-white">{metrics.focusScore || 0}%</p>
         </div>
       </div>
 
@@ -229,12 +257,36 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Totals Verification (hidden in production, shows if mismatch) */}
-      {!totalsMatch && (
-        <div className="bg-yellow-500/10 rounded-lg p-2 text-center border border-yellow-500/20">
-          <p className="text-[8px] text-yellow-400">
-            Warning: Task totals mismatch. Expected {metrics.totalTasks}, got {totalFromPie}
-          </p>
+      {/* Streak Info */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-white/5 rounded-lg p-2 text-center">
+          <Flame size={14} className="text-orange-500 mx-auto mb-1" />
+          <p className="text-lg font-bold text-white">{metrics.streakDays || 0}</p>
+          <p className="text-[7px] text-slate-400">Current Streak</p>
+        </div>
+        <div className="bg-white/5 rounded-lg p-2 text-center">
+          <Award size={14} className="text-yellow-500 mx-auto mb-1" />
+          <p className="text-lg font-bold text-white">{metrics.longestStreak || 0}</p>
+          <p className="text-[7px] text-slate-400">Longest Streak</p>
+        </div>
+      </div>
+
+      {/* Focus Hours Chart */}
+      {metrics.focusHours && metrics.focusHours.length > 0 && (
+        <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+          <div className="flex items-center gap-2 mb-2">
+            <LineChartIcon size={12} className="text-purple-400" />
+            <span className="text-[10px] font-semibold text-white">Focus Hours Performance</span>
+          </div>
+          <ResponsiveContainer width="100%" height={140}>
+            <BarChart data={metrics.focusHours} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="hour" tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px' }} />
+              <Bar dataKey="score" fill="#06b6d4" radius={[4, 4, 0, 0]} name="Success Rate %" />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       )}
 
@@ -295,21 +347,25 @@ const Dashboard = () => {
             )}
           </div>
 
+          {/* Risk & Performance Chart */}
           {weeklyChartData.length > 0 && (
             <div className="bg-white/5 rounded-xl p-3 border border-white/10">
               <div className="flex items-center gap-2 mb-2">
-                <Activity size={12} className="text-purple-400" />
-                <span className="text-[10px] font-semibold text-white">Weekly Performance</span>
+                <Gauge size={12} className="text-purple-400" />
+                <span className="text-[10px] font-semibold text-white">Risk & Performance Trend</span>
               </div>
-              <ResponsiveContainer width="100%" height={140}>
-                <BarChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={160}>
+                <ComposedChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px' }} />
-                  <Bar dataKey="completion" fill="#22c55e" radius={[4, 4, 0, 0]} name="Completion %" />
-                </BarChart>
+                  <Bar yAxisId="left" dataKey="completion" fill="#22c55e" radius={[4, 4, 0, 0]} name="Completion %" />
+                  <Line yAxisId="right" type="monotone" dataKey="riskScore" stroke="#ef4444" strokeWidth={2} name="Risk Score" dot={{ r: 3 }} />
+                </ComposedChart>
               </ResponsiveContainer>
+              <p className="text-[7px] text-slate-500 text-center mt-1">Lower risk + higher completion = optimal performance</p>
             </div>
           )}
         </>
@@ -353,26 +409,32 @@ const Dashboard = () => {
             return (
               <div className="bg-white/5 rounded-xl p-4 border border-white/10">
                 <div className="flex justify-between items-center mb-3">
-                  <h3 className="text-sm font-bold text-white">{selectedDay} Performance</h3>
-                  <Target size={12} className="text-purple-400" />
+                  <div>
+                    <h3 className="text-sm font-bold text-white">{selectedDay} Performance</h3>
+                    <p className="text-[10px] text-purple-400 mt-0.5">Behavior: {stats.behavior}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[8px] text-slate-400">Day Score</p>
+                    <p className="text-xl font-bold text-yellow-500">{stats.dayScore}</p>
+                  </div>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className="bg-slate-800/50 rounded-lg p-2 text-center">
-                    <p className="text-[8px] text-slate-400">Completion Rate</p>
+                    <p className="text-[8px] text-slate-400">Completion</p>
                     <p className="text-xl font-bold text-green-400">{stats.completionRate}%</p>
                   </div>
                   <div className="bg-slate-800/50 rounded-lg p-2 text-center">
-                    <p className="text-[8px] text-slate-400">Avg Accuracy</p>
+                    <p className="text-[8px] text-slate-400">Accuracy</p>
                     <p className="text-xl font-bold text-cyan-400">{stats.avgAccuracy}%</p>
                   </div>
                   <div className="bg-slate-800/50 rounded-lg p-2 text-center">
-                    <p className="text-[8px] text-slate-400">Avg Delay</p>
+                    <p className="text-[8px] text-slate-400">Delay</p>
                     <p className="text-xl font-bold text-orange-400">{stats.avgDelay}m</p>
                   </div>
                   <div className="bg-slate-800/50 rounded-lg p-2 text-center">
-                    <p className="text-[8px] text-slate-400">Total Tasks</p>
-                    <p className="text-xl font-bold text-white">{stats.totalTasks}</p>
+                    <p className="text-[8px] text-slate-400">Focus</p>
+                    <p className="text-xl font-bold text-purple-400">{stats.focusScore}%</p>
                   </div>
                 </div>
                 
@@ -383,27 +445,40 @@ const Dashboard = () => {
                   <div><p className="text-red-400">Missed</p><p className="text-white font-bold">{stats.missedTasks}</p></div>
                 </div>
                 
-                {(stats.overdueTasks > 0 || stats.rescheduledTasks > 0) && (
-                  <div className="mt-3 pt-2 border-t border-white/10 grid grid-cols-2 gap-2 text-center text-[9px]">
-                    {stats.overdueTasks > 0 && <div><p className="text-purple-400">Overdue</p><p className="text-white font-bold">{stats.overdueTasks}</p></div>}
-                    {stats.rescheduledTasks > 0 && <div><p className="text-yellow-500">Rescheduled</p><p className="text-white font-bold">{stats.rescheduledTasks}</p></div>}
+                {stats.riskScore > 30 && (
+                  <div className="mt-3 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                    <p className="text-[8px] text-red-400 flex items-center gap-1">
+                      <AlertTriangle size={10} />
+                      Risk Level: {stats.riskLevel} ({stats.riskScore}%)
+                    </p>
                   </div>
                 )}
+                
+                <div className="mt-3 pt-2 border-t border-white/10">
+                  <p className="text-[8px] text-purple-400">
+                    {stats.completionRate >= 80 ? "Excellent day! Keep this momentum." :
+                     stats.completionRate >= 60 ? "Good progress. Focus on starting on time." :
+                     stats.avgDelay > 15 ? "Significant delays. Set reminders 10min before tasks." :
+                     "Keep pushing! Consistency will improve your score."}
+                  </p>
+                </div>
               </div>
             );
           })()}
         </div>
       )}
 
-      {/* Integrity Warning */}
-      {(metrics.missedTasks > 0 || metrics.overdueTasks > 0) && (
+      {/* Performance Alert */}
+      {(metrics.missedTasks > 0 || metrics.overdueTasks > 0 || metrics.riskLevel === 'High') && (
         <div className="bg-gradient-to-r from-red-500/10 to-orange-500/10 rounded-xl p-3 border border-red-500/20">
           <div className="flex items-start gap-2">
             <AlertTriangle size={12} className="text-red-400 mt-0.5" />
             <div>
               <p className="text-[10px] font-semibold text-red-400">Performance Alert</p>
               <p className="text-[9px] text-slate-300">
-                {metrics.missedTasks > 0 && metrics.overdueTasks > 0
+                {metrics.riskLevel === 'High' 
+                  ? "High risk detected. Review your schedule and prioritize tasks."
+                  : metrics.missedTasks > 0 && metrics.overdueTasks > 0
                   ? `${metrics.missedTasks} missed and ${metrics.overdueTasks} overdue tasks. Complete tasks on time to improve your score.`
                   : metrics.missedTasks > 0
                   ? `${metrics.missedTasks} missed tasks. Start tasks on time to avoid penalties.`

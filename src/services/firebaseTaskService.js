@@ -1,3 +1,4 @@
+// src/services/firebaseTaskService.js - OPTIMIZED VERSION
 import { 
   db, auth, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, 
   query, where, Timestamp, writeBatch 
@@ -311,64 +312,47 @@ export const completeTask = async (taskId, actualEndTime = null, completionType 
   await updateWeekMetrics(task.weekId);
 };
 
-// FIXED: RESCHEDULE - ONLY carry over progress if task was ACTUALLY STARTED
+// OPTIMIZED: Reschedule using batch write - PREVENTS PURPLE SCREEN
 export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, weekId, carriedProgress = null) => {
+  const userId = getUserId();
+  const batch = writeBatch(db); // Use batch for atomic operation
+  
   const taskRef = doc(db, TASKS_COLLECTION, taskId);
   const taskDoc = await getDoc(taskRef);
   const originalTask = taskDoc.data();
   
   if (!originalTask) throw new Error('Task not found');
   
-  // CRITICAL FIX: Only carry over progress if task was ACTUALLY started
   const wasStarted = originalTask.status === 'active' || originalTask.status === 'in_progress';
   const hasActualStart = originalTask.actualStart !== null;
   const wasEverStarted = wasStarted && hasActualStart;
   
-  // Calculate progress to carry - ONLY if task was ever started
   let currentProgress = 0;
   if (wasEverStarted) {
     currentProgress = carriedProgress !== null ? carriedProgress : (originalTask.manualProgress || originalTask.completion || 0);
-  } else {
-    currentProgress = 0; // Task never started - NO progress to carry
   }
   
-  // Calculate cumulative progress (only add if there was actual progress)
   const previousCumulative = originalTask.cumulativeProgress || 0;
   const newCumulativeProgress = wasEverStarted ? Math.min(100, previousCumulative + currentProgress) : previousCumulative;
-  
-  // Track reschedule history
-  const rescheduleHistory = originalTask.rescheduleHistory || [];
-  rescheduleHistory.push({
-    fromDay: originalTask.day,
-    fromTime: originalTask.startTime,
-    toDay: newDay,
-    toTime: newStartTime,
-    progressAtReschedule: currentProgress,
-    cumulativeAtReschedule: newCumulativeProgress,
-    wasStarted: wasEverStarted,
-    timestamp: new Date().toISOString()
-  });
-  
   const newRescheduleCount = (originalTask.rescheduleCount || 0) + 1;
   
-  // Mark original task as rescheduled
-  await updateDoc(taskRef, {
+  // Batch update original task
+  batch.update(taskRef, {
     status: 'rescheduled',
     rescheduledTo: `${newDay} at ${newStartTime}`,
     rescheduledDate: Timestamp.now(),
     rescheduleCount: newRescheduleCount,
-    completed: false,
     progressAtReschedule: currentProgress,
     cumulativeProgress: newCumulativeProgress,
     wasStartedBeforeReschedule: wasEverStarted,
     updatedAt: Timestamp.now()
   });
   
-  // Create NEW task with cumulative progress (only if was started)
+  // Batch create new task
   const newTaskId = `${originalTask.weekId}_${newDay}_${newStartTime}_${Date.now()}`;
   const newTaskRef = doc(db, TASKS_COLLECTION, newTaskId);
   
-  await setDoc(newTaskRef, {
+  batch.set(newTaskRef, {
     id: newTaskId,
     userId: originalTask.userId,
     weekId: originalTask.weekId,
@@ -391,10 +375,8 @@ export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, w
     priority: originalTask.priority,
     notes: originalTask.notes,
     rescheduledFrom: true,
-    rescheduledTo: null,
     originalTaskId: taskId,
     cumulativeProgress: newCumulativeProgress,
-    rescheduleHistory: rescheduleHistory,
     rescheduleCount: newRescheduleCount,
     carryOverProgress: wasEverStarted ? currentProgress : 0,
     remainingWork: wasEverStarted ? 100 - newCumulativeProgress : 100,
@@ -403,7 +385,12 @@ export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, w
     updatedAt: Timestamp.now()
   });
   
+  // Execute batch - ONE atomic operation
+  await batch.commit();
+  
+  // Update metrics once after batch
   await updateWeekMetrics(originalTask.weekId);
+  
   return newTaskId;
 };
 
@@ -426,18 +413,39 @@ export const deleteTask = async (taskId) => {
   if (task && task.weekId) await updateWeekMetrics(task.weekId);
 };
 
+// OPTIMIZED: Throttled metrics update to prevent multiple rapid updates
+let metricsUpdateQueue = new Map();
+let metricsUpdateTimeout = null;
+
 export const updateWeekMetrics = async (weekId) => {
-  const tasks = await getWeekTasks(weekId);
-  const metrics = calculateMetrics(tasks);
-  const weekRef = doc(db, WEEKS_COLLECTION, weekId);
-  await updateDoc(weekRef, { metrics, updatedAt: Timestamp.now() });
-  return metrics;
+  // Debounce metrics updates - prevents multiple rapid updates
+  if (metricsUpdateTimeout) {
+    clearTimeout(metricsUpdateTimeout);
+  }
+  
+  return new Promise((resolve) => {
+    metricsUpdateTimeout = setTimeout(async () => {
+      try {
+        const tasks = await getWeekTasks(weekId);
+        const metrics = calculateMetrics(tasks);
+        const weekRef = doc(db, WEEKS_COLLECTION, weekId);
+        await updateDoc(weekRef, { metrics, updatedAt: Timestamp.now() });
+        resolve(metrics);
+      } catch (error) {
+        console.error('Error updating metrics:', error);
+        resolve(null);
+      } finally {
+        metricsUpdateTimeout = null;
+      }
+    }, 100); // 100ms debounce
+  });
 };
 
 export const checkMissedTasks = async (weekId, selectedDate) => {
   const tasks = await getWeekTasks(weekId);
   const now = new Date();
   let updated = false;
+  const batch = writeBatch(db);
   
   for (const task of tasks) {
     if (task.status === 'pending' && task.title && !task.rescheduledFrom) {
@@ -447,7 +455,8 @@ export const checkMissedTasks = async (weekId, selectedDate) => {
       endTime.setHours(endHour, endMin, 0, 0);
       
       if (now > endTime) {
-        await updateDoc(doc(db, TASKS_COLLECTION, task.id), {
+        const taskRef = doc(db, TASKS_COLLECTION, task.id);
+        batch.update(taskRef, {
           status: 'missed',
           missedReason: 'overdue',
           updatedAt: Timestamp.now()
@@ -457,7 +466,10 @@ export const checkMissedTasks = async (weekId, selectedDate) => {
     }
   }
   
-  if (updated) await updateWeekMetrics(weekId);
+  if (updated) {
+    await batch.commit();
+    await updateWeekMetrics(weekId);
+  }
 };
 
 export const getBestFocusHours = async () => {

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Play, Check, RotateCcw, Edit2, X, Clock, AlertTriangle, Battery, Calendar, Ban, Target, Zap } from 'lucide-react';
-import { startTask, completeTask, rescheduleTask, updateTask, addTask } from '../../services/firebaseTaskService';
+import { startTask, completeTask, updateTask, addTask } from '../../services/firebaseTaskService';
 import { TaskModal } from '../TaskModal/TaskModal';
 import { 
   notifyTaskStart, 
@@ -24,8 +24,6 @@ const toMinutes = (timeStr) => {
 };
 
 // ==================== SYSTEM A: VISUAL REALITY (CELL DISPLAY) ====================
-// This ONLY tracks time-elapsed for the battery fill effect
-
 const getTimeElapsedProgress = (task, selectedDate, now) => {
   if (!task || task.status === 'completed') return 100;
   if (task.status === 'missed') return 100;
@@ -38,26 +36,20 @@ const getTimeElapsedProgress = (task, selectedDate, now) => {
   const [endHour, endMin] = task.endTime.split(':').map(Number);
   end.setHours(endHour, endMin, 0, 0);
   
-  // Before scheduled start → 0%
   if (now < start) return 0;
-  
-  // After scheduled end → 100%
   if (now > end) return 100;
   
-  // During window → linear fill
   const total = end - start;
   const elapsed = now - start;
   return Math.min(100, Math.max(0, (elapsed / total) * 100));
 };
 
 const getCellColorState = (task, isPast, now, selectedDate) => {
-  // Don't apply opacity to missed tasks - they should remain visible
   if (isPast && task.status !== 'missed') return 'border-slate-600 bg-slate-800/50 opacity-60';
   if (task.status === 'completed') return 'border-green-500 bg-green-500/20';
   if (task.status === 'rescheduled') return 'border-yellow-500 bg-yellow-500/20';
   if (task.status === 'missed') return 'border-red-500 bg-red-500/20';
   
-  // Check if overdue (time passed, not completed)
   const end = new Date(selectedDate);
   const [endHour, endMin] = task.endTime.split(':').map(Number);
   end.setHours(endHour, endMin, 0, 0);
@@ -71,8 +63,6 @@ const getCellColorState = (task, isPast, now, selectedDate) => {
 };
 
 // ==================== SYSTEM B: PERFORMANCE TRUTH (ANALYTICS) ====================
-// This calculates actual user performance from stored data
-
 const calculatePerformanceMetrics = (task) => {
   if (!task) return null;
   
@@ -87,7 +77,6 @@ const calculatePerformanceMetrics = (task) => {
   let delayMinutes = 0;
   let timeDeviation = 0;
   
-  // Handle missed tasks properly
   if (task.status === 'missed') {
     return {
       scheduledStart,
@@ -152,38 +141,34 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const [showEditModal, setShowEditModal] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [showCompletionConfirm, setShowCompletionConfirm] = useState(false);
-  const [showRescheduleConfirm, setShowRescheduleConfirm] = useState(false);
   const [manualStart, setManualStart] = useState('');
   const [manualEnd, setManualEnd] = useState('');
   const [newDay, setNewDay] = useState(task?.day || 'Monday');
   const [newTime, setNewTime] = useState(task?.startTime || '08:00');
   const [localTask, setLocalTask] = useState(task);
   const [isStarting, setIsStarting] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false); // ADDED: Safety lock for reschedule
   const [timeProgress, setTimeProgress] = useState(0);
-  const popupRef = useRef(null);
-  const intervalRef = useRef(null); // CHANGED: from animationFrameRef to intervalRef
+  const intervalRef = useRef(null);
   const overdueNotifiedRef = useRef(false);
   const timeArrivedNotifiedRef = useRef(false);
   const timeEndedNotifiedRef = useRef(false);
   
-  // OPTIMIZATION: Memoize performance metrics
   const performance = useMemo(() => calculatePerformanceMetrics(localTask), [localTask]);
   
   useEffect(() => { setLocalTask(task); }, [task]);
   
-  // OPTIMIZATION: Replace requestAnimationFrame with setInterval (30 seconds)
+  // OPTIMIZED: Time-elapsed animation - updates every 30 seconds
   useEffect(() => {
     if (!localTask || isPast || localTask.status === 'completed' || localTask.status === 'missed') return;
     
-    // Initial update
     const initialProgress = getTimeElapsedProgress(localTask, selectedDate, new Date());
     setTimeProgress(initialProgress);
     
-    // Update every 30 seconds instead of 60fps
     intervalRef.current = setInterval(() => {
       const progress = getTimeElapsedProgress(localTask, selectedDate, new Date());
       setTimeProgress(progress);
-    }, 30000); // 30 seconds - smooth enough for battery fill
+    }, 30000);
     
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -192,16 +177,14 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   
   // Body scroll lock
   useEffect(() => {
-    if (isExpanded || showCompletionConfirm || showRescheduleConfirm) {
+    if (isExpanded || showCompletionConfirm) {
       document.body.style.overflow = 'hidden';
       return () => { document.body.style.overflow = 'unset'; };
     }
-  }, [isExpanded, showCompletionConfirm, showRescheduleConfirm]);
+  }, [isExpanded, showCompletionConfirm]);
   
-  // OPTIMIZATION: Memoize the current time for color calculations
   const currentNow = useMemo(() => new Date(), [timeProgress]);
   
-  // Overdue check
   const isTaskOverdue = useCallback(() => {
     if (!localTask || localTask.status === 'completed' || localTask.status === 'missed') return false;
     const end = new Date(selectedDate);
@@ -210,27 +193,25 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     return new Date() > end;
   }, [localTask, selectedDate]);
   
-  // Check if task start time has arrived
   const isTaskTimeArrived = useCallback(() => {
     if (!localTask || localTask.status !== 'pending') return false;
     const start = new Date(selectedDate);
     const [startHour, startMin] = localTask.startTime.split(':').map(Number);
     start.setHours(startHour, startMin, 0, 0);
-    const now = new Date();
-    return now >= start;
+    const nowDate = new Date();
+    return nowDate >= start;
   }, [localTask, selectedDate]);
   
-  // Check if task end time has arrived (for ongoing tasks)
   const isTaskTimeEnded = useCallback(() => {
     if (!localTask || localTask.status !== 'active') return false;
     const end = new Date(selectedDate);
     const [endHour, endMin] = localTask.endTime.split(':').map(Number);
     end.setHours(endHour, endMin, 0, 0);
-    const now = new Date();
-    return now > end;
+    const nowDate = new Date();
+    return nowDate > end;
   }, [localTask, selectedDate]);
   
-  // Time arrived notification
+  // Notifications
   useEffect(() => {
     if (isTaskTimeArrived() && localTask && localTask.status === 'pending' && !timeArrivedNotifiedRef.current) {
       notifyTaskTimeArrived(localTask.title, localTask.startTime);
@@ -238,7 +219,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     }
   }, [isTaskTimeArrived, localTask]);
   
-  // Time ended notification for ongoing tasks
   useEffect(() => {
     if (isTaskTimeEnded() && localTask && localTask.status === 'active' && !timeEndedNotifiedRef.current) {
       notifyTaskTimeEnded(localTask.title, localTask.endTime);
@@ -246,7 +226,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     }
   }, [isTaskTimeEnded, localTask]);
   
-  // Overdue notification
   useEffect(() => {
     if (isTaskOverdue() && localTask && localTask.status === 'pending' && !overdueNotifiedRef.current) {
       notifyTaskOverdue(localTask.title, localTask.endTime);
@@ -255,16 +234,14 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     }
   }, [isTaskOverdue, localTask]);
   
-  // Handle start task
   const handleStart = useCallback(async () => {
-    if (isStarting) return;
+    if (isStarting || isProcessing) return;
     if (!isPast && localTask && localTask.status === 'pending') {
       setIsStarting(true);
       try {
         const actualStartTime = new Date();
         await startTask(localTask.id, actualStartTime);
         
-        // Check if task was started late
         const scheduledStartMinutes = toMinutes(localTask.startTime);
         const actualStartMinutes = actualStartTime.getHours() * 60 + actualStartTime.getMinutes();
         const delayMinutes = actualStartMinutes - scheduledStartMinutes;
@@ -283,9 +260,8 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
         setIsStarting(false);
       }
     }
-  }, [isPast, localTask, onUpdate, isStarting]);
+  }, [isPast, localTask, onUpdate, isStarting, isProcessing]);
   
-  // Handle completion with analytics
   const handleCompleteClick = useCallback(() => {
     setShowCompletionConfirm(true);
   }, []);
@@ -327,76 +303,95 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     }
   }, [localTask, onUpdate]);
   
-  // Reschedule - preserves work progress if any (works for missed tasks too)
+  // FIXED: SAFE RESCHEDULE with lockdown to prevent purple screen
   const handleReschedule = useCallback(async () => {
-    if (!localTask) return;
-    
-    const wasStarted = !!localTask.actualStart;
-    const workProgress = localTask.manualProgress || 0;
+    // SAFETY LOCKDOWN: Prevent multiple taps and race conditions
+    if (isProcessing || !localTask) return;
+    setIsProcessing(true);
     
     // Store old values for notification
     const oldStartTime = localTask.startTime;
     const oldEndTime = localTask.endTime;
     const oldDay = localTask.day;
+    const wasStarted = !!localTask.actualStart;
+    const workProgress = localTask.manualProgress || 0;
     
-    // Mark original as rescheduled (or update if it was missed)
-    await updateTask(localTask.id, {
-      status: 'rescheduled',
-      rescheduledTo: `${newDay} at ${newTime}`,
-      rescheduledDate: new Date().toISOString(),
-      rescheduleCount: (localTask.rescheduleCount || 0) + 1
-    });
-    
-    // Create new task with carried progress
-    const newEndTime = `${parseInt(newTime.split(':')[0]) + 1}:${newTime.split(':')[1]}`;
-    await addTask(weekId, {
-      title: localTask.title,
-      category: localTask.category,
-      subcategory: localTask.subcategory,
-      day: newDay,
-      startTime: newTime,
-      endTime: newEndTime,
-      originalTaskId: localTask.id,
-      rescheduledFrom: true,
-      rescheduleCount: (localTask.rescheduleCount || 0) + 1,
-      status: 'pending',
-      carryOverProgress: wasStarted ? workProgress : 0,
-      cumulativeProgress: wasStarted ? workProgress : 0
-    });
-    
-    // Send reschedule notification
-    const dayChanged = newDay !== oldDay;
-    notifyTaskRescheduled(
-      localTask.title, 
-      oldStartTime, 
-      newTime, 
-      oldEndTime, 
-      newEndTime, 
-      dayChanged ? newDay : null
-    );
-    
-    onUpdate();
-    setIsExpanded(false);
-    setShowReschedule(false);
-    setShowManualEntry(false);
-  }, [localTask, newDay, newTime, weekId, onUpdate]);
+    try {
+      // CRITICAL: Close modals IMMEDIATELY to free up GPU memory
+      setIsExpanded(false);
+      setShowReschedule(false);
+      setShowManualEntry(false);
+      
+      // Mark original as rescheduled
+      await updateTask(localTask.id, {
+        status: 'rescheduled',
+        rescheduledTo: `${newDay} at ${newTime}`,
+        rescheduledDate: new Date().toISOString(),
+        rescheduleCount: (localTask.rescheduleCount || 0) + 1
+      });
+      
+      // Create new task with carried progress
+      const newEndTime = `${parseInt(newTime.split(':')[0]) + 1}:${newTime.split(':')[1]}`;
+      await addTask(weekId, {
+        title: localTask.title,
+        category: localTask.category,
+        subcategory: localTask.subcategory,
+        day: newDay,
+        startTime: newTime,
+        endTime: newEndTime,
+        originalTaskId: localTask.id,
+        rescheduledFrom: true,
+        rescheduleCount: (localTask.rescheduleCount || 0) + 1,
+        status: 'pending',
+        carryOverProgress: wasStarted ? workProgress : 0,
+        cumulativeProgress: wasStarted ? workProgress : 0
+      });
+      
+      // Send reschedule notification
+      const dayChanged = newDay !== oldDay;
+      notifyTaskRescheduled(
+        localTask.title, 
+        oldStartTime, 
+        newTime, 
+        oldEndTime, 
+        newEndTime, 
+        dayChanged ? newDay : null
+      );
+      
+      // Refresh parent component
+      await onUpdate();
+      
+    } catch (error) {
+      console.error("Error rescheduling task:", error);
+      alert("Could not reschedule. Please check your connection and try again.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [localTask, newDay, newTime, weekId, onUpdate, isProcessing]);
   
   const handleCancelTask = useCallback(async () => {
+    if (isProcessing) return;
     if (localTask && confirm('Cancel this task? It will be marked as missed.')) {
-      await updateTask(localTask.id, { status: 'missed', completion: 0, accuracy: 0 });
-      notifyTaskCancelled(localTask.title, 'missed');
-      onUpdate();
-      setIsExpanded(false);
+      setIsProcessing(true);
+      try {
+        await updateTask(localTask.id, { status: 'missed', completion: 0, accuracy: 0 });
+        notifyTaskCancelled(localTask.title, 'missed');
+        onUpdate();
+        setIsExpanded(false);
+      } finally {
+        setIsProcessing(false);
+      }
     }
-  }, [localTask, onUpdate]);
+  }, [localTask, onUpdate, isProcessing]);
   
-  // Handle manual completion entry for missed tasks
   const handleManualComplete = useCallback(async () => {
+    if (isProcessing) return;
     if (!manualStart || !manualEnd) {
       alert('Please enter both start and end times');
       return;
     }
     
+    setIsProcessing(true);
     try {
       const completedAt = new Date();
       completedAt.setHours(parseInt(manualEnd.split(':')[0]), parseInt(manualEnd.split(':')[1]), 0, 0);
@@ -405,9 +400,8 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
       actualStart.setHours(parseInt(manualStart.split(':')[0]), parseInt(manualStart.split(':')[1]), 0, 0);
       
       const scheduledEnd = localTask.endTime;
-      const scheduledEndMinutes = toMinutes(scheduledEnd);
       const completedMinutes = toMinutes(manualEnd);
-      const diff = completedMinutes - scheduledEndMinutes;
+      const diff = completedMinutes - toMinutes(scheduledEnd);
       
       let completionType = 'on_time';
       let bonus = 10;
@@ -437,8 +431,10 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
       setManualEnd('');
     } catch (error) {
       console.error("Error recording manual completion:", error);
+    } finally {
+      setIsProcessing(false);
     }
-  }, [localTask, manualStart, manualEnd, onUpdate]);
+  }, [localTask, manualStart, manualEnd, onUpdate, isProcessing]);
   
   if (!localTask) return null;
   
@@ -449,11 +445,8 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const isRescheduled = localTask.status === 'rescheduled';
   const isOverdue = isTaskOverdue();
   const showStartButton = isPending && !isCompleted && !isMissed && !isRescheduled && !isOngoing;
-  // OPTIMIZATION: Use memoized currentNow instead of new Date()
   const cellColor = getCellColorState(localTask, isPast, currentNow, selectedDate);
   const isHorizontal = viewMode === 'day';
-  
-  // Allow clicking on missed tasks (they're not truly "past" in terms of interaction)
   const isClickable = !isPast || isMissed;
   
   const fillStyle = isHorizontal 
@@ -538,7 +531,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const popupContent = isExpanded && isClickable && createPortal(
     <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }} onClick={() => setIsExpanded(false)}>
       <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-y-auto" style={{ width: '100%', maxWidth: '480px', maxHeight: '85vh' }} onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
         <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm p-4 border-b border-white/10 bg-gradient-to-r from-purple-500/10 to-blue-500/10">
           <div className="flex items-center justify-between">
             <div className="flex-1">
@@ -553,7 +545,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
           </div>
         </div>
         
-        {/* System A: Time Battery Info */}
         {!isMissed && (
           <div className="p-4 border-b border-white/10">
             <div className="bg-slate-800/50 rounded-lg p-3">
@@ -569,7 +560,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
           </div>
         )}
         
-        {/* System B: Performance Analytics */}
         <div className="p-4">
           <div className="flex items-center gap-2 mb-3">
             <Target size={14} className="text-purple-400" />
@@ -578,10 +568,9 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
           <AnalyticsPanel />
         </div>
         
-        {/* Action Buttons */}
         <div className="p-4 pt-0 space-y-2">
           {showStartButton && (
-            <button onClick={handleStart} disabled={isStarting} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white transition disabled:opacity-50">
+            <button onClick={handleStart} disabled={isStarting || isProcessing} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white transition disabled:opacity-50">
               {isStarting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Play size={14} />}
               {isStarting ? 'Starting...' : 'Start Task'}
             </button>
@@ -593,14 +582,16 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
             </button>
           )}
           
-          {/* Reschedule button - now shows for missed tasks too */}
           {(!isCompleted && !isRescheduled) && (
-            <button onClick={() => setShowReschedule(true)} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-yellow-600 hover:bg-yellow-700 text-white transition">
+            <button 
+              onClick={() => setShowReschedule(true)} 
+              disabled={isProcessing}
+              className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-yellow-600 hover:bg-yellow-700 text-white transition disabled:opacity-50"
+            >
               <RotateCcw size={14} /> Reschedule {isMissed ? '(Missed Task)' : ''}
             </button>
           )}
           
-          {/* Manual entry for missed/overdue tasks */}
           {((isOverdue && !isCompleted && !isRescheduled) || isMissed) && (
             <button onClick={() => setShowManualEntry(true)} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white transition">
               <Calendar size={14} /> Record Completion (Log actual times)
@@ -608,7 +599,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
           )}
           
           {(isOngoing || isPending) && !isCompleted && !isRescheduled && !isMissed && (
-            <button onClick={handleCancelTask} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white transition">
+            <button onClick={handleCancelTask} disabled={isProcessing} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white transition disabled:opacity-50">
               <Ban size={14} /> Cancel / Miss
             </button>
           )}
@@ -622,7 +613,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     document.body
   );
   
-  // Completion confirmation modal
   const completionConfirmContent = showCompletionConfirm && createPortal(
     <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.8)' }}>
       <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden max-w-sm w-full">
@@ -647,7 +637,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     document.body
   );
   
-  // Reschedule modal
   const rescheduleContent = showReschedule && createPortal(
     <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.8)' }} onClick={() => setShowReschedule(false)}>
       <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
@@ -661,8 +650,19 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
           </select>
           <input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} className="w-full p-2 text-sm rounded-lg bg-slate-800 border border-white/10 text-white" />
           <div className="flex gap-3 pt-2">
-            <button onClick={handleReschedule} className="flex-1 py-2 rounded-lg bg-yellow-600 text-white text-sm font-semibold hover:bg-yellow-700 transition">
-              Reschedule
+            <button 
+              onClick={handleReschedule} 
+              disabled={isProcessing}
+              className="flex-1 py-2 rounded-lg bg-yellow-600 text-white text-sm font-semibold hover:bg-yellow-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isProcessing ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                'Reschedule'
+              )}
             </button>
             <button onClick={() => setShowReschedule(false)} className="flex-1 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold hover:bg-slate-600 transition">
               Cancel
@@ -674,7 +674,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     document.body
   );
   
-  // Manual entry modal for missed/overdue tasks
   const manualEntryContent = showManualEntry && createPortal(
     <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.8)' }} onClick={() => setShowManualEntry(false)}>
       <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
@@ -690,7 +689,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
               value={manualStart} 
               onChange={(e) => setManualStart(e.target.value)} 
               className="w-full p-2 text-sm rounded-lg bg-slate-800 border border-white/10 text-white" 
-              placeholder="Start time"
             />
           </div>
           <div>
@@ -700,12 +698,11 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
               value={manualEnd} 
               onChange={(e) => setManualEnd(e.target.value)} 
               className="w-full p-2 text-sm rounded-lg bg-slate-800 border border-white/10 text-white" 
-              placeholder="End time"
             />
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={handleManualComplete} className="flex-1 py-2 rounded-lg bg-orange-600 text-white text-sm font-semibold hover:bg-orange-700 transition">
-              Save Completion
+            <button onClick={handleManualComplete} disabled={isProcessing} className="flex-1 py-2 rounded-lg bg-orange-600 text-white text-sm font-semibold hover:bg-orange-700 transition disabled:opacity-50">
+              {isProcessing ? 'Saving...' : 'Save Completion'}
             </button>
             <button onClick={() => setShowManualEntry(false)} className="flex-1 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold hover:bg-slate-600 transition">
               Cancel
@@ -721,16 +718,14 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     <>
       <div className="relative h-full w-full">
         <button
-          onClick={() => isClickable && setIsExpanded(!isExpanded)}
-          className={`w-full h-14 rounded-lg border relative overflow-hidden transition-all duration-200 text-left ${isClickable ? 'cursor-pointer hover:brightness-110' : 'cursor-default'} ${cellColor}`}
-          disabled={!isClickable}
+          onClick={() => isClickable && !isProcessing && setIsExpanded(!isExpanded)}
+          className={`w-full h-14 rounded-lg border relative overflow-hidden transition-all duration-200 text-left ${isClickable && !isProcessing ? 'cursor-pointer hover:brightness-110' : 'cursor-default'} ${cellColor}`}
+          disabled={!isClickable || isProcessing}
         >
-          {/* Time Battery Fill - System A */}
           {timeProgress > 0 && !isPast && !isMissed && !isCompleted && (
             <div className="absolute transition-all duration-300 ease-out" style={{ ...fillStyle, background: getFillColor(), opacity: 0.7 }} />
           )}
           
-          {/* Content */}
           <div className="relative z-10 p-1.5 h-full flex flex-col justify-between">
             <div className="flex items-center justify-between">
               <p className="text-[10px] font-medium truncate text-white max-w-[60px]">
@@ -770,7 +765,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
       {rescheduleContent}
       {manualEntryContent}
       
-      {/* FIX: Render TaskModal with createPortal to ensure it's on top */}
       {showEditModal && createPortal(
         <TaskModal 
           isOpen={showEditModal} 

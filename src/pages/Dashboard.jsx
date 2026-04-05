@@ -1,20 +1,20 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { getCurrentWeek, getWeekTasks, updateWeekMetrics, getBestFocusHours } from '../services/firebaseTaskService';
+import { getCurrentWeek, getWeekTasks, getBestFocusHours } from '../services/firebaseTaskService';
 import { calculateTaskAnalytics } from '../services/analyticsService';
 import { useAuth } from '../context/AuthContext';
 import { useCurrentTime } from '../hooks/useCurrentTime';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, LineChart, Line, ComposedChart } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, ComposedChart, Line } from 'recharts';
 import { 
-  TrendingUp, Target, Zap, Clock, Award, Calendar, 
+  TrendingUp, Target, Zap, Award, Calendar, 
   ChevronLeft, ChevronRight, AlertTriangle, CheckCircle, XCircle, 
-  Activity, Battery, Cpu, Brain, Sparkles, RotateCcw, AlertOctagon, 
-  Eye, List, LayoutGrid, Flame, TrendingDown, BarChart3, LineChart as LineChartIcon,
-  Shield, Gauge, Radar
+  Brain, Sparkles, RotateCcw, AlertOctagon, 
+  List, LayoutGrid, Flame, 
+  Shield, Gauge
 } from 'lucide-react';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-// Memoized chart components to prevent re-renders
+// Memoized chart components
 const TaskStatusPieChart = React.memo(({ data }) => {
   if (!data || data.length === 0) return null;
   return (
@@ -78,7 +78,7 @@ const FocusHoursChart = React.memo(({ data }) => {
   return (
     <div className="bg-white/5 rounded-xl p-3 border border-white/10">
       <div className="flex items-center gap-2 mb-2">
-        <LineChartIcon size={12} className="text-purple-400" />
+        <Gauge size={12} className="text-purple-400" />
         <span className="text-[10px] font-semibold text-white">Focus Hours Performance</span>
       </div>
       <ResponsiveContainer width="100%" height={140}>
@@ -120,8 +120,6 @@ const RiskPerformanceChart = React.memo(({ data }) => {
 
 const Dashboard = React.memo(() => {
   const { user } = useAuth();
-  const now = useCurrentTime();
-  const [week, setWeek] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
@@ -129,10 +127,10 @@ const Dashboard = React.memo(() => {
   const [selectedDay, setSelectedDay] = useState(null);
   const [bestHours, setBestHours] = useState([]);
   const [viewMode, setViewMode] = useState('week');
+  const [analyticsCache, setAnalyticsCache] = useState(null);
   const loadingRef = useRef(false);
   const mountedRef = useRef(true);
 
-  // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -140,21 +138,16 @@ const Dashboard = React.memo(() => {
     };
   }, []);
 
+  // Load tasks only when needed
   const loadData = useCallback(async () => {
     if (!user || loadingRef.current) return;
     loadingRef.current = true;
     try {
       if (mountedRef.current) setLoading(true);
       const currentWeek = await getCurrentWeek(selectedDate);
-      if (!mountedRef.current) return;
-      setWeek(currentWeek);
       const weekTasks = await getWeekTasks(currentWeek.id);
       if (!mountedRef.current) return;
       setTasks(weekTasks);
-      
-      const analytics = calculateTaskAnalytics(weekTasks);
-      if (!mountedRef.current) return;
-      setMetrics(analytics);
       
       const hours = await getBestFocusHours();
       if (!mountedRef.current) return;
@@ -166,6 +159,15 @@ const Dashboard = React.memo(() => {
       if (mountedRef.current) setLoading(false);
     }
   }, [user, selectedDate]);
+
+  // Cache analytics calculation (only runs when tasks change)
+  useEffect(() => {
+    if (tasks.length > 0) {
+      const analytics = calculateTaskAnalytics(tasks);
+      setAnalyticsCache(analytics);
+      setMetrics(analytics);
+    }
+  }, [tasks]);
 
   useEffect(() => {
     loadData();
@@ -205,20 +207,14 @@ const Dashboard = React.memo(() => {
     return { ...analytics, dayScore };
   }, [tasks]);
 
-  // Memoize heavy calculations
   const weeklyChartData = useMemo(() => {
     return days.map(day => {
       const stats = getDayStats(day);
       return {
         name: day.slice(0, 3),
         completion: stats.completionRate,
-        missed: stats.missedTasks,
-        overdue: stats.overdueTasks,
-        rescheduled: stats.rescheduledTasks,
-        tasks: stats.totalTasks,
-        delay: stats.avgDelay,
-        accuracy: stats.avgAccuracy,
-        riskScore: stats.riskScore
+        riskScore: stats.riskScore,
+        tasks: stats.totalTasks
       };
     }).filter(d => d.tasks > 0);
   }, [getDayStats]);
@@ -396,9 +392,9 @@ const Dashboard = React.memo(() => {
         </div>
       </div>
 
-      {/* Focus Hours Chart - Memoized */}
-      {metrics.focusHours && metrics.focusHours.length > 0 && (
-        <FocusHoursChart data={metrics.focusHours} />
+      {/* Focus Hours Chart */}
+      {bestHours && bestHours.length > 0 && (
+        <FocusHoursChart data={bestHours} />
       )}
 
       {/* WEEK VIEW */}
@@ -409,7 +405,6 @@ const Dashboard = React.memo(() => {
             <QualityPieChart data={qualityPieData} />
           </div>
 
-          {/* Risk & Performance Chart */}
           {weeklyChartData.length > 0 && (
             <RiskPerformanceChart data={weeklyChartData} />
           )}

@@ -1,3 +1,4 @@
+// src/components/WeekView/WeekView.jsx - With paginated expansion
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2 } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
@@ -9,7 +10,7 @@ import { notifyUpcomingTask, notifyTaskOverdue, requestNotificationPermission } 
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-// ============ OPTIMIZED NOTIFICATION ENGINE (OUTSIDE COMPONENT) ============
+// ============ OPTIMIZED NOTIFICATION ENGINE ============
 let lastNotificationRun = 0;
 const NOTIFICATION_THROTTLE_MS = 15000;
 
@@ -23,12 +24,10 @@ const runNotificationEngine = (tasks, notifiedSet) => {
   const dayIndex = currentDate.getDay();
   const currentDay = DAYS[dayIndex === 0 ? 6 : dayIndex - 1];
   
-  // Single pass - only today's pending tasks
   for (let i = 0; i < tasks.length; i++) {
     const t = tasks[i];
     if (t.day !== currentDay || t.status !== 'pending') continue;
     
-    // Use pre-calculated minutes
     const startMinutes = t.startMinutes;
     const endMinutes = t.endMinutes;
     const minutesUntilStart = startMinutes - currentMinutes;
@@ -71,6 +70,7 @@ export default function WeekView() {
   const [viewMode, setViewMode] = useState('day');
   const [selectedDay, setSelectedDay] = useState(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1);
   const [expandedSections, setExpandedSections] = useState({});
+  const [visibleSlotCount, setVisibleSlotCount] = useState(3); // PAGINATION: start with 3 slots
   const [sortOrder, setSortOrder] = useState('asc');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -133,7 +133,12 @@ export default function WeekView() {
 
   useEffect(() => { if (user) loadWeek(); }, [user, loadWeek, refreshKey]);
 
-  // Optimized notification system - only depends on user
+  // Reset visible slot count when changing days or view mode
+  useEffect(() => {
+    setVisibleSlotCount(3);
+  }, [selectedDay, viewMode]);
+
+  // Optimized notification system
   useEffect(() => {
     if (!user) return;
     
@@ -161,6 +166,7 @@ export default function WeekView() {
   const handleRefresh = useCallback(async () => { 
     setRefreshKey(prev => prev + 1);
     notifiedTasksRef.current.clear();
+    setVisibleSlotCount(3); // Reset pagination on refresh
   }, []);
 
   const changeWeek = (direction) => {
@@ -168,6 +174,7 @@ export default function WeekView() {
     newDate.setDate(selectedDate.getDate() + (direction * 7));
     setSelectedDate(newDate);
     notifiedTasksRef.current.clear();
+    setVisibleSlotCount(3);
   };
 
   const getDayDate = useCallback((dayName) => {
@@ -208,7 +215,7 @@ export default function WeekView() {
 
   const currentPos = getCurrentTimePosition();
   
-  // OPTIMIZED: O(1) task lookup using map
+  // O(1) task lookup using map
   const taskMap = useMemo(() => {
     const map = {};
     for (let i = 0; i < tasks.length; i++) {
@@ -222,7 +229,6 @@ export default function WeekView() {
     return taskMap[`${day}-${time}`];
   }, [taskMap]);
   
-  // Group tasks by day for statistics
   const tasksByDay = useMemo(() => {
     const map = {};
     for (let i = 0; i < tasks.length; i++) {
@@ -271,25 +277,37 @@ export default function WeekView() {
   }, [now, sortedDayTimes]);
 
   const currentSlotIndex = getCurrentTimeSlotIndex();
-  const visibleCount = 3;
   const startIndex = Math.max(0, currentSlotIndex - 1);
 
+  // PAGINATION: Show visibleSlotCount slots, not all at once
   const visibleDaySlots = useMemo(() => {
-    if (expandedSections['dayView'] || sortedDayTimes.length <= visibleCount) {
-      return sortedDayTimes;
+    if (expandedSections['dayView']) {
+      // When expanded, show up to visibleSlotCount slots (pagination)
+      return sortedDayTimes.slice(0, visibleSlotCount);
     }
-    return sortedDayTimes.slice(startIndex, startIndex + visibleCount);
-  }, [expandedSections, sortedDayTimes, startIndex, visibleCount]);
+    // Collapsed view: show only around current time
+    return sortedDayTimes.slice(startIndex, startIndex + 3);
+  }, [expandedSections, sortedDayTimes, startIndex, visibleSlotCount]);
 
   const visibleWeekSlots = useMemo(() => {
-    if (expandedSections['weekView'] || sortedWeekTimes.length <= visibleCount) {
-      return sortedWeekTimes;
+    if (expandedSections['weekView']) {
+      return sortedWeekTimes.slice(0, visibleSlotCount);
     }
-    return sortedWeekTimes.slice(0, visibleCount);
-  }, [expandedSections, sortedWeekTimes, visibleCount]);
+    return sortedWeekTimes.slice(0, 3);
+  }, [expandedSections, sortedWeekTimes, visibleSlotCount]);
 
-  const hasMoreSlots = sortedDayTimes.length > visibleCount && !expandedSections['dayView'];
-  const hasMoreWeekSlots = sortedWeekTimes.length > visibleCount && !expandedSections['weekView'];
+  const hasMoreSlots = sortedDayTimes.length > visibleSlotCount && expandedSections['dayView'];
+  const hasMoreWeekSlots = sortedWeekTimes.length > visibleSlotCount && expandedSections['weekView'];
+
+  // Load more slots (add 3 at a time)
+  const loadMoreSlots = () => {
+    setVisibleSlotCount(prev => Math.min(prev + 3, sortedDayTimes.length));
+  };
+
+  // Load all slots (if user really wants all)
+  const loadAllSlots = () => {
+    setVisibleSlotCount(sortedDayTimes.length);
+  };
 
   const toggleSortOrder = () => {
     setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -297,14 +315,20 @@ export default function WeekView() {
 
   const toggleSection = (sectionId) => {
     setExpandedSections(prev => ({ ...prev, [sectionId]: !prev[sectionId] }));
+    // Reset pagination when expanding/collapsing
+    if (!expandedSections[sectionId]) {
+      setVisibleSlotCount(3);
+    }
   };
 
   const expandAll = () => {
     setExpandedSections({ dayView: true, weekView: true });
+    setVisibleSlotCount(3); // Start with 3, then load more on demand
   };
 
   const collapseAll = () => {
     setExpandedSections({ dayView: false, weekView: false });
+    setVisibleSlotCount(3);
   };
 
   const handleSlotClick = (day, time, dayDate) => {
@@ -500,7 +524,10 @@ export default function WeekView() {
               return (
                 <button
                   key={day}
-                  onClick={() => setSelectedDay(idx)}
+                  onClick={() => {
+                    setSelectedDay(idx);
+                    setVisibleSlotCount(3);
+                  }}
                   className={`flex-1 min-w-[60px] py-2 rounded-lg text-center transition ${selectedDay === idx ? 'bg-purple-600 text-white' : 'bg-white/5 text-slate-400'} ${isToday ? 'border border-purple-500/50' : ''}`}
                 >
                   <div className="text-[10px] font-bold">{day.slice(0, 3)}</div>
@@ -512,7 +539,7 @@ export default function WeekView() {
           </div>
         )}
 
-        {/* Time Slots Grid - FIXED: static grid-cols-8 */}
+        {/* Time Slots Grid */}
         <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-xl overflow-hidden w-full">
           <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-white/5 w-full`}>
             <div className="p-2 text-center text-[9px] font-bold text-slate-500 uppercase border-r border-white/5">Time</div>
@@ -566,20 +593,31 @@ export default function WeekView() {
                 );
               })}
               
+              {/* PAGINATION: Load More button */}
               {hasMoreSlots && (
-                <button
-                  onClick={() => toggleSection('dayView')}
-                  className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
-                >
-                  <ChevronDown size={12} /> Show More ({sortedDayTimes.length - visibleCount} more time slots)
-                </button>
+                <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
+                  <button
+                    onClick={loadMoreSlots}
+                    className="flex-1 py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-purple-500/10 rounded-lg"
+                  >
+                    <ChevronDown size={12} /> Load 3 More ({sortedDayTimes.length - visibleSlotCount} remaining)
+                  </button>
+                  <button
+                    onClick={loadAllSlots}
+                    className="py-2 px-3 text-center text-[10px] text-slate-400 hover:text-white transition flex items-center justify-center gap-1 bg-white/5 rounded-lg"
+                  >
+                    Load All ({sortedDayTimes.length})
+                  </button>
+                </div>
               )}
-              {expandedSections['dayView'] && sortedDayTimes.length > visibleCount && (
+              
+              {/* Show Less button when expanded */}
+              {expandedSections['dayView'] && visibleSlotCount > 3 && (
                 <button
-                  onClick={() => toggleSection('dayView')}
+                  onClick={() => setVisibleSlotCount(3)}
                   className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
                 >
-                  <ChevronUp size={12} /> Show Less
+                  <ChevronUp size={12} /> Show Less (back to 3 slots)
                 </button>
               )}
             </>
@@ -641,19 +679,28 @@ export default function WeekView() {
               })}
               
               {hasMoreWeekSlots && (
-                <button
-                  onClick={() => toggleSection('weekView')}
-                  className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
-                >
-                  <ChevronDown size={12} /> Show More ({sortedWeekTimes.length - visibleCount} more time slots)
-                </button>
+                <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
+                  <button
+                    onClick={loadMoreSlots}
+                    className="flex-1 py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-purple-500/10 rounded-lg"
+                  >
+                    <ChevronDown size={12} /> Load 3 More ({sortedWeekTimes.length - visibleSlotCount} remaining)
+                  </button>
+                  <button
+                    onClick={loadAllSlots}
+                    className="py-2 px-3 text-center text-[10px] text-slate-400 hover:text-white transition flex items-center justify-center gap-1 bg-white/5 rounded-lg"
+                  >
+                    Load All ({sortedWeekTimes.length})
+                  </button>
+                </div>
               )}
-              {expandedSections['weekView'] && sortedWeekTimes.length > visibleCount && (
+              
+              {expandedSections['weekView'] && visibleSlotCount > 3 && (
                 <button
-                  onClick={() => toggleSection('weekView')}
+                  onClick={() => setVisibleSlotCount(3)}
                   className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
                 >
-                  <ChevronUp size={12} /> Show Less
+                  <ChevronUp size={12} /> Show Less (back to 3 slots)
                 </button>
               )}
             </>

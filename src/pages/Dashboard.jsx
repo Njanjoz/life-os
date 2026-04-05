@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { getCurrentWeek, getWeekTasks, updateWeekMetrics, getBestFocusHours } from '../services/firebaseTaskService';
 import { calculateTaskAnalytics } from '../services/analyticsService';
 import { useAuth } from '../context/AuthContext';
@@ -14,7 +14,111 @@ import {
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-const Dashboard = () => {
+// Memoized chart components to prevent re-renders
+const TaskStatusPieChart = React.memo(({ data }) => {
+  if (!data || data.length === 0) return null;
+  return (
+    <div className="bg-white/5 rounded-xl p-2 border border-white/10">
+      <div className="flex items-center gap-1 justify-center mb-1">
+        <Target size={10} className="text-purple-400" />
+        <span className="text-[8px] font-semibold text-white">Task Status</span>
+      </div>
+      <ResponsiveContainer width="100%" height={100}>
+        <PieChart>
+          <Pie data={data} cx="50%" cy="50%" innerRadius={20} outerRadius={35} paddingAngle={2} dataKey="value" isAnimationActive={false}>
+            {data.map((entry, index) => (<Cell key={index} fill={entry.color} />))}
+          </Pie>
+          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '8px' }} />
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="flex justify-center gap-2 mt-1">
+        {data.map((item, i) => (
+          <div key={i} className="flex items-center gap-0.5">
+            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: item.color }} />
+            <span className="text-[6px] text-slate-400">{item.name}</span>
+            <span className="text-[6px] text-white">{item.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
+
+const QualityPieChart = React.memo(({ data }) => {
+  if (!data || data.length === 0) return null;
+  return (
+    <div className="bg-white/5 rounded-xl p-2 border border-white/10">
+      <div className="flex items-center gap-1 justify-center mb-1">
+        <TrendingUp size={10} className="text-purple-400" />
+        <span className="text-[8px] font-semibold text-white">Completion Quality</span>
+      </div>
+      <ResponsiveContainer width="100%" height={100}>
+        <PieChart>
+          <Pie data={data} cx="50%" cy="50%" innerRadius={20} outerRadius={35} paddingAngle={2} dataKey="value" isAnimationActive={false}>
+            {data.map((entry, index) => (<Cell key={index} fill={entry.color} />))}
+          </Pie>
+          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '8px' }} />
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="flex justify-center gap-2 mt-1">
+        {data.map((item, i) => (
+          <div key={i} className="flex items-center gap-0.5">
+            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: item.color }} />
+            <span className="text-[6px] text-slate-400">{item.name}</span>
+            <span className="text-[6px] text-white">{item.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
+
+const FocusHoursChart = React.memo(({ data }) => {
+  if (!data || data.length === 0) return null;
+  return (
+    <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+      <div className="flex items-center gap-2 mb-2">
+        <LineChartIcon size={12} className="text-purple-400" />
+        <span className="text-[10px] font-semibold text-white">Focus Hours Performance</span>
+      </div>
+      <ResponsiveContainer width="100%" height={140}>
+        <BarChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+          <XAxis dataKey="hour" tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px' }} />
+          <Bar dataKey="score" fill="#06b6d4" radius={[4, 4, 0, 0]} name="Success Rate %" isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+});
+
+const RiskPerformanceChart = React.memo(({ data }) => {
+  if (!data || data.length === 0) return null;
+  return (
+    <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+      <div className="flex items-center gap-2 mb-2">
+        <Gauge size={12} className="text-purple-400" />
+        <span className="text-[10px] font-semibold text-white">Risk & Performance Trend</span>
+      </div>
+      <ResponsiveContainer width="100%" height={160}>
+        <ComposedChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+          <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="left" tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+          <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px' }} />
+          <Bar yAxisId="left" dataKey="completion" fill="#22c55e" radius={[4, 4, 0, 0]} name="Completion %" isAnimationActive={false} />
+          <Line yAxisId="right" type="monotone" dataKey="riskScore" stroke="#ef4444" strokeWidth={2} name="Risk Score" dot={{ r: 3 }} isAnimationActive={false} />
+        </ComposedChart>
+      </ResponsiveContainer>
+      <p className="text-[7px] text-slate-500 text-center mt-1">Lower risk + higher completion = optimal performance</p>
+    </div>
+  );
+});
+
+const Dashboard = React.memo(() => {
   const { user } = useAuth();
   const now = useCurrentTime();
   const [week, setWeek] = useState(null);
@@ -25,28 +129,41 @@ const Dashboard = () => {
   const [selectedDay, setSelectedDay] = useState(null);
   const [bestHours, setBestHours] = useState([]);
   const [viewMode, setViewMode] = useState('week');
+  const loadingRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const loadData = useCallback(async () => {
-    if (!user) return;
+    if (!user || loadingRef.current) return;
+    loadingRef.current = true;
     try {
-      setLoading(true);
+      if (mountedRef.current) setLoading(true);
       const currentWeek = await getCurrentWeek(selectedDate);
+      if (!mountedRef.current) return;
       setWeek(currentWeek);
       const weekTasks = await getWeekTasks(currentWeek.id);
+      if (!mountedRef.current) return;
       setTasks(weekTasks);
       
-      // Use intelligent analytics engine
       const analytics = calculateTaskAnalytics(weekTasks);
+      if (!mountedRef.current) return;
       setMetrics(analytics);
       
       const hours = await getBestFocusHours();
+      if (!mountedRef.current) return;
       setBestHours(hours);
-      
-      console.log('Intelligent Analytics:', analytics);
     } catch (error) {
       console.error('Load dashboard error:', error);
     } finally {
-      setLoading(false);
+      loadingRef.current = false;
+      if (mountedRef.current) setLoading(false);
     }
   }, [user, selectedDate]);
 
@@ -54,29 +171,30 @@ const Dashboard = () => {
     loadData();
   }, [loadData]);
 
-  const changeWeek = (direction) => {
+  const changeWeek = useCallback((direction) => {
     const newDate = new Date(selectedDate);
     newDate.setDate(selectedDate.getDate() + (direction * 7));
     setSelectedDate(newDate);
-  };
+    setSelectedDay(null);
+  }, [selectedDate]);
 
-  const getWeekStart = (date) => {
+  const getWeekStart = useCallback((date) => {
     const start = new Date(date);
     const day = start.getDay();
     const diff = (day === 0 ? 6 : day - 1);
     start.setDate(start.getDate() - diff);
     start.setHours(0, 0, 0, 0);
     return start;
-  };
+  }, []);
 
-  const formatDateRange = () => {
+  const formatDateRange = useCallback(() => {
     const startOfWeek = getWeekStart(selectedDate);
     const endOfWeek = new Date(startOfWeek);
     endOfWeek.setDate(startOfWeek.getDate() + 6);
     return `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  };
+  }, [selectedDate, getWeekStart]);
 
-  const getDayStats = (day) => {
+  const getDayStats = useCallback((day) => {
     const dayTasks = tasks.filter(t => t.day === day);
     const analytics = calculateTaskAnalytics(dayTasks);
     const dayScore = Math.round(
@@ -85,37 +203,56 @@ const Dashboard = () => {
       (100 - analytics.avgDelay) * 0.3
     );
     return { ...analytics, dayScore };
-  };
+  }, [tasks]);
 
-  const weeklyChartData = days.map(day => {
-    const stats = getDayStats(day);
-    return {
-      name: day.slice(0, 3),
-      completion: stats.completionRate,
-      missed: stats.missedTasks,
-      overdue: stats.overdueTasks,
-      rescheduled: stats.rescheduledTasks,
-      tasks: stats.totalTasks,
-      delay: stats.avgDelay,
-      accuracy: stats.avgAccuracy,
-      riskScore: stats.riskScore
-    };
-  }).filter(d => d.tasks > 0);
+  // Memoize heavy calculations
+  const weeklyChartData = useMemo(() => {
+    return days.map(day => {
+      const stats = getDayStats(day);
+      return {
+        name: day.slice(0, 3),
+        completion: stats.completionRate,
+        missed: stats.missedTasks,
+        overdue: stats.overdueTasks,
+        rescheduled: stats.rescheduledTasks,
+        tasks: stats.totalTasks,
+        delay: stats.avgDelay,
+        accuracy: stats.avgAccuracy,
+        riskScore: stats.riskScore
+      };
+    }).filter(d => d.tasks > 0);
+  }, [getDayStats]);
 
-  const mainPieData = [
-    { name: 'Completed', value: metrics.completedTasks || 0, color: '#22c55e' },
-    { name: 'Missed', value: metrics.missedTasks || 0, color: '#ef4444' },
-    { name: 'Overdue', value: metrics.overdueTasks || 0, color: '#8b5cf6' },
-    { name: 'Rescheduled', value: metrics.rescheduledTasks || 0, color: '#eab308' }
-  ].filter(d => d.value > 0);
+  const mainPieData = useMemo(() => {
+    return [
+      { name: 'Completed', value: metrics.completedTasks || 0, color: '#22c55e' },
+      { name: 'Missed', value: metrics.missedTasks || 0, color: '#ef4444' },
+      { name: 'Overdue', value: metrics.overdueTasks || 0, color: '#8b5cf6' },
+      { name: 'Rescheduled', value: metrics.rescheduledTasks || 0, color: '#eab308' }
+    ].filter(d => d.value > 0);
+  }, [metrics.completedTasks, metrics.missedTasks, metrics.overdueTasks, metrics.rescheduledTasks]);
 
-  const qualityPieData = [
-    { name: 'Early', value: metrics.earlyCount || 0, color: '#22c55e' },
-    { name: 'On Time', value: metrics.onTimeCount || 0, color: '#3b82f6' },
-    { name: 'Late', value: metrics.lateCount || 0, color: '#f97316' }
-  ].filter(d => d.value > 0);
+  const qualityPieData = useMemo(() => {
+    return [
+      { name: 'Early', value: metrics.earlyCount || 0, color: '#22c55e' },
+      { name: 'On Time', value: metrics.onTimeCount || 0, color: '#3b82f6' },
+      { name: 'Late', value: metrics.lateCount || 0, color: '#f97316' }
+    ].filter(d => d.value > 0);
+  }, [metrics.earlyCount, metrics.onTimeCount, metrics.lateCount]);
 
-  if (loading) {
+  const getRiskColor = useCallback(() => {
+    if (metrics.riskLevel === 'High') return 'text-red-400';
+    if (metrics.riskLevel === 'Medium') return 'text-yellow-400';
+    return 'text-green-400';
+  }, [metrics.riskLevel]);
+
+  const getRiskBg = useCallback(() => {
+    if (metrics.riskLevel === 'High') return 'bg-red-500/20 border-red-500/30';
+    if (metrics.riskLevel === 'Medium') return 'bg-yellow-500/20 border-yellow-500/30';
+    return 'bg-green-500/20 border-green-500/30';
+  }, [metrics.riskLevel]);
+
+  if (loading && tasks.length === 0) {
     return (
       <div className="flex justify-center items-center h-96">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-purple-500 border-t-transparent"></div>
@@ -123,18 +260,6 @@ const Dashboard = () => {
       </div>
     );
   }
-
-  const getRiskColor = () => {
-    if (metrics.riskLevel === 'High') return 'text-red-400';
-    if (metrics.riskLevel === 'Medium') return 'text-yellow-400';
-    return 'text-green-400';
-  };
-
-  const getRiskBg = () => {
-    if (metrics.riskLevel === 'High') return 'bg-red-500/20 border-red-500/30';
-    if (metrics.riskLevel === 'Medium') return 'bg-yellow-500/20 border-yellow-500/30';
-    return 'bg-green-500/20 border-green-500/30';
-  };
 
   return (
     <div className="space-y-4 pb-20">
@@ -271,102 +396,22 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Focus Hours Chart */}
+      {/* Focus Hours Chart - Memoized */}
       {metrics.focusHours && metrics.focusHours.length > 0 && (
-        <div className="bg-white/5 rounded-xl p-3 border border-white/10">
-          <div className="flex items-center gap-2 mb-2">
-            <LineChartIcon size={12} className="text-purple-400" />
-            <span className="text-[10px] font-semibold text-white">Focus Hours Performance</span>
-          </div>
-          <ResponsiveContainer width="100%" height={140}>
-            <BarChart data={metrics.focusHours} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="hour" tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px' }} />
-              <Bar dataKey="score" fill="#06b6d4" radius={[4, 4, 0, 0]} name="Success Rate %" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <FocusHoursChart data={metrics.focusHours} />
       )}
 
       {/* WEEK VIEW */}
       {viewMode === 'week' && (
         <>
           <div className="grid grid-cols-2 gap-2">
-            {mainPieData.length > 0 && (
-              <div className="bg-white/5 rounded-xl p-2 border border-white/10">
-                <div className="flex items-center gap-1 justify-center mb-1">
-                  <Target size={10} className="text-purple-400" />
-                  <span className="text-[8px] font-semibold text-white">Task Status</span>
-                </div>
-                <ResponsiveContainer width="100%" height={100}>
-                  <PieChart>
-                    <Pie data={mainPieData} cx="50%" cy="50%" innerRadius={20} outerRadius={35} paddingAngle={2} dataKey="value" isAnimationActive={false}>
-                      {mainPieData.map((entry, index) => (<Cell key={index} fill={entry.color} />))}
-                    </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '8px' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="flex justify-center gap-2 mt-1">
-                  {mainPieData.map((item, i) => (
-                    <div key={i} className="flex items-center gap-0.5">
-                      <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: item.color }} />
-                      <span className="text-[6px] text-slate-400">{item.name}</span>
-                      <span className="text-[6px] text-white">{item.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {qualityPieData.length > 0 && (
-              <div className="bg-white/5 rounded-xl p-2 border border-white/10">
-                <div className="flex items-center gap-1 justify-center mb-1">
-                  <TrendingUp size={10} className="text-purple-400" />
-                  <span className="text-[8px] font-semibold text-white">Completion Quality</span>
-                </div>
-                <ResponsiveContainer width="100%" height={100}>
-                  <PieChart>
-                    <Pie data={qualityPieData} cx="50%" cy="50%" innerRadius={20} outerRadius={35} paddingAngle={2} dataKey="value" isAnimationActive={false}>
-                      {qualityPieData.map((entry, index) => (<Cell key={index} fill={entry.color} />))}
-                    </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '8px' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="flex justify-center gap-2 mt-1">
-                  {qualityPieData.map((item, i) => (
-                    <div key={i} className="flex items-center gap-0.5">
-                      <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: item.color }} />
-                      <span className="text-[6px] text-slate-400">{item.name}</span>
-                      <span className="text-[6px] text-white">{item.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <TaskStatusPieChart data={mainPieData} />
+            <QualityPieChart data={qualityPieData} />
           </div>
 
           {/* Risk & Performance Chart */}
           {weeklyChartData.length > 0 && (
-            <div className="bg-white/5 rounded-xl p-3 border border-white/10">
-              <div className="flex items-center gap-2 mb-2">
-                <Gauge size={12} className="text-purple-400" />
-                <span className="text-[10px] font-semibold text-white">Risk & Performance Trend</span>
-              </div>
-              <ResponsiveContainer width="100%" height={160}>
-                <ComposedChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 8, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px' }} />
-                  <Bar yAxisId="left" dataKey="completion" fill="#22c55e" radius={[4, 4, 0, 0]} name="Completion %" />
-                  <Line yAxisId="right" type="monotone" dataKey="riskScore" stroke="#ef4444" strokeWidth={2} name="Risk Score" dot={{ r: 3 }} />
-                </ComposedChart>
-              </ResponsiveContainer>
-              <p className="text-[7px] text-slate-500 text-center mt-1">Lower risk + higher completion = optimal performance</p>
-            </div>
+            <RiskPerformanceChart data={weeklyChartData} />
           )}
         </>
       )}
@@ -490,6 +535,8 @@ const Dashboard = () => {
       )}
     </div>
   );
-};
+});
+
+Dashboard.displayName = 'Dashboard';
 
 export default Dashboard;

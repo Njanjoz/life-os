@@ -1,5 +1,5 @@
 // src/components/TaskCell/TaskCell.jsx
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Play, Check, RotateCcw, Edit2, X, Clock, AlertTriangle, Battery, Calendar, Ban, Target, Zap } from 'lucide-react';
 import { startTask, completeTask, rescheduleTask, updateTask, addTask } from '../../services/firebaseTaskService';
@@ -161,29 +161,32 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const [isStarting, setIsStarting] = useState(false);
   const [timeProgress, setTimeProgress] = useState(0);
   const popupRef = useRef(null);
-  const animationFrameRef = useRef(null);
+  const intervalRef = useRef(null); // CHANGED: from animationFrameRef to intervalRef
   const overdueNotifiedRef = useRef(false);
   const timeArrivedNotifiedRef = useRef(false);
   const timeEndedNotifiedRef = useRef(false);
   
-  // Performance metrics (System B) - calculated on demand
-  const performance = calculatePerformanceMetrics(localTask);
+  // OPTIMIZATION: Memoize performance metrics
+  const performance = useMemo(() => calculatePerformanceMetrics(localTask), [localTask]);
   
   useEffect(() => { setLocalTask(task); }, [task]);
   
-  // System A: Time-elapsed animation for battery fill
+  // OPTIMIZATION: Replace requestAnimationFrame with setInterval (30 seconds)
   useEffect(() => {
     if (!localTask || isPast || localTask.status === 'completed' || localTask.status === 'missed') return;
     
-    const updateTimeProgress = () => {
+    // Initial update
+    const initialProgress = getTimeElapsedProgress(localTask, selectedDate, new Date());
+    setTimeProgress(initialProgress);
+    
+    // Update every 30 seconds instead of 60fps
+    intervalRef.current = setInterval(() => {
       const progress = getTimeElapsedProgress(localTask, selectedDate, new Date());
       setTimeProgress(progress);
-      animationFrameRef.current = requestAnimationFrame(updateTimeProgress);
-    };
+    }, 30000); // 30 seconds - smooth enough for battery fill
     
-    animationFrameRef.current = requestAnimationFrame(updateTimeProgress);
     return () => {
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [localTask, selectedDate, isPast]);
   
@@ -194,6 +197,9 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
       return () => { document.body.style.overflow = 'unset'; };
     }
   }, [isExpanded, showCompletionConfirm, showRescheduleConfirm]);
+  
+  // OPTIMIZATION: Memoize the current time for color calculations
+  const currentNow = useMemo(() => new Date(), [timeProgress]);
   
   // Overdue check
   const isTaskOverdue = useCallback(() => {
@@ -443,7 +449,8 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const isRescheduled = localTask.status === 'rescheduled';
   const isOverdue = isTaskOverdue();
   const showStartButton = isPending && !isCompleted && !isMissed && !isRescheduled && !isOngoing;
-  const cellColor = getCellColorState(localTask, isPast, new Date(), selectedDate);
+  // OPTIMIZATION: Use memoized currentNow instead of new Date()
+  const cellColor = getCellColorState(localTask, isPast, currentNow, selectedDate);
   const isHorizontal = viewMode === 'day';
   
   // Allow clicking on missed tasks (they're not truly "past" in terms of interaction)

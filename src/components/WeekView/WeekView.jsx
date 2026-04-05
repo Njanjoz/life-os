@@ -5,6 +5,7 @@ import { TaskModal } from '../TaskModal/TaskModal';
 import { useRealTimeClock } from '../../hooks/useRealTimeClock';
 import { getCurrentWeek, getWeekTasks, addTask, updateWeekMetrics, checkMissedTasks, getBestFocusHours, getTheme, updateTheme, getTimeSlots, updateTimeSlots, resetAllUserData, deleteAllTasksForWeek } from '../../services/firebaseTaskService';
 import { useAuth } from '../../context/AuthContext';
+import { notifyUpcomingTask, notifyTaskOverdue, requestNotificationPermission } from '../../services/notificationService';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -33,6 +34,7 @@ export default function WeekView() {
   const [resetting, setResetting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const isLoadingRef = useRef(false);
+  const notifiedTasksRef = useRef(new Set());
 
   const loadWeek = useCallback(async () => {
     if (isLoadingRef.current || !user) return;
@@ -71,14 +73,103 @@ export default function WeekView() {
 
   useEffect(() => { if (user) loadWeek(); }, [user, loadWeek, refreshKey]);
 
+  // NOTIFICATION SYSTEM - This checks every minute for tasks that need notifications
+  useEffect(() => {
+    if (!user || !tasks.length) return;
+    
+    // Request notification permission when component mounts
+    requestNotificationPermission();
+    
+    // Clear notified tasks set when tasks change (new day/week)
+    notifiedTasksRef.current.clear();
+    
+    // Check for notifications every minute
+    const interval = setInterval(() => {
+      const now = new Date();
+      const currentTime = now.toTimeString().slice(0, 5);
+      const currentDayIndex = now.getDay();
+      // Convert Sunday (0) to index 6 for our Monday-first array
+      const currentDay = DAYS[currentDayIndex === 0 ? 6 : currentDayIndex - 1];
+      
+      tasks.forEach(task => {
+        // Skip if task is completed, missed, or rescheduled
+        if (task.status === 'completed' || task.status === 'missed' || task.status === 'rescheduled') {
+          return;
+        }
+        
+        // Only check tasks for today
+        if (task.day !== currentDay) {
+          return;
+        }
+        
+        const taskStart = task.startTime;
+        const taskEnd = task.endTime;
+        
+        // Parse times for comparison
+        const [currentHour, currentMinute] = currentTime.split(':').map(Number);
+        const [startHour, startMinute] = taskStart.split(':').map(Number);
+        const [endHour, endMinute] = taskEnd.split(':').map(Number);
+        
+        const currentMinutes = currentHour * 60 + currentMinute;
+        const startMinutes = startHour * 60 + startMinute;
+        const endMinutes = endHour * 60 + endMinute;
+        
+        const minutesUntilStart = startMinutes - currentMinutes;
+        const minutesSinceEnd = currentMinutes - endMinutes;
+        
+        // NOTIFICATION 1: Task starting NOW (within 1 minute)
+        if (minutesUntilStart <= 1 && minutesUntilStart >= -1 && task.status === 'pending') {
+          if (!notifiedTasksRef.current.has(`${task.id}-now`)) {
+            notifyUpcomingTask(task.title, task.startTime, 0);
+            notifiedTasksRef.current.add(`${task.id}-now`);
+            console.log(`[Notification] Task starting now: ${task.title}`);
+          }
+        }
+        
+        // NOTIFICATION 2: Task starting in 5 minutes
+        if (minutesUntilStart <= 5 && minutesUntilStart > 4 && task.status === 'pending') {
+          if (!notifiedTasksRef.current.has(`${task.id}-5min`)) {
+            notifyUpcomingTask(task.title, task.startTime, 5);
+            notifiedTasksRef.current.add(`${task.id}-5min`);
+            console.log(`[Notification] Task starting in 5 min: ${task.title}`);
+          }
+        }
+        
+        // NOTIFICATION 3: Task starting in 10 minutes
+        if (minutesUntilStart <= 10 && minutesUntilStart > 9 && task.status === 'pending') {
+          if (!notifiedTasksRef.current.has(`${task.id}-10min`)) {
+            notifyUpcomingTask(task.title, task.startTime, 10);
+            notifiedTasksRef.current.add(`${task.id}-10min`);
+            console.log(`[Notification] Task starting in 10 min: ${task.title}`);
+          }
+        }
+        
+        // NOTIFICATION 4: Task is overdue (past end time and still pending)
+        if (minutesSinceEnd > 0 && task.status === 'pending') {
+          if (!notifiedTasksRef.current.has(`${task.id}-overdue`)) {
+            notifyTaskOverdue(task.title, task.endTime);
+            notifiedTasksRef.current.add(`${task.id}-overdue`);
+            console.log(`[Notification] Task overdue: ${task.title}`);
+          }
+        }
+      });
+    }, 60000); // Check every 60 seconds
+    
+    return () => clearInterval(interval);
+  }, [user, tasks]);
+
   const handleRefresh = useCallback(async () => { 
     setRefreshKey(prev => prev + 1);
+    // Clear notification tracking when refreshing (new data loaded)
+    notifiedTasksRef.current.clear();
   }, []);
 
   const changeWeek = (direction) => {
     const newDate = new Date(selectedDate);
     newDate.setDate(selectedDate.getDate() + (direction * 7));
     setSelectedDate(newDate);
+    // Clear notification tracking when changing weeks
+    notifiedTasksRef.current.clear();
   };
 
   const getTaskAtSlot = (day, time) => tasks.find(t => t.day === day && t.startTime === time);

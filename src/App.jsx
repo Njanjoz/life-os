@@ -1,14 +1,41 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import WeekView from './components/WeekView/WeekView';
 import Dashboard from './pages/Dashboard';
 import { Login } from './components/Login/Login';
-import { LayoutDashboard, CalendarDays } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, Bell } from 'lucide-react';
+import { requestNotificationPermission } from './services/notificationService';
 import './index.css';
 
 function AppContent() {
   const { user, loading, signInWithGoogle, logout, error } = useAuth();
   const [activeTab, setActiveTab] = useState('schedule');
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+
+  // Check notification permission on load
+  useEffect(() => {
+    if (user && Notification.permission === 'granted') {
+      setNotificationsEnabled(true);
+    }
+  }, [user]);
+
+  // Request notification permission when user logs in
+  useEffect(() => {
+    if (user) {
+      requestNotificationPermission();
+    }
+  }, [user]);
+
+  const handleEnableNotifications = async () => {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      setNotificationsEnabled(true);
+      new Notification("✅ Notifications Enabled", {
+        body: "You will now receive automatic task reminders and alerts.",
+        icon: "/favicon.ico"
+      });
+    }
+  };
 
   if (loading) {
     return (
@@ -33,7 +60,7 @@ function AppContent() {
       </div>
       
       <div className="max-w-[1600px] mx-auto relative z-10">
-        <header className="mb-6 flex justify-between items-end">
+        <header className="mb-6 flex justify-between items-end flex-wrap gap-3">
           <div>
             <h1 className="text-4xl font-black italic tracking-tighter text-white">
               Life<span className="text-purple-400">OS</span>
@@ -67,6 +94,25 @@ function AppContent() {
                 Dashboard
               </button>
             </div>
+            
+            {/* Notification Enable Button */}
+            {!notificationsEnabled && (
+              <button 
+                onClick={handleEnableNotifications}
+                className="bg-green-600/20 hover:bg-green-600/30 px-3 py-2 rounded-xl text-xs text-green-400 transition flex items-center gap-1 border border-green-500/30"
+              >
+                <Bell size={12} />
+                Enable Notifications
+              </button>
+            )}
+            
+            {notificationsEnabled && (
+              <div className="bg-green-600/20 px-3 py-2 rounded-xl text-xs text-green-400 flex items-center gap-1">
+                <Bell size={12} />
+                Notifications ON
+              </div>
+            )}
+            
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-2 rounded-xl">
               <span className="text-xs">👤 {user.displayName || user.email}</span>
             </div>

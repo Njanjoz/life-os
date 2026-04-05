@@ -1,4 +1,4 @@
-// src/services/notificationService.js
+// src/services/notificationService.js - Complete notification service
 
 // Check if browser notifications are supported and permitted
 const checkNotificationSupport = () => {
@@ -32,120 +32,297 @@ const sendNotification = (title, options) => {
   if (Notification.permission === 'granted') {
     const notification = new Notification(title, options);
     
-    // Auto-close after 5 seconds (except for overdue which requires interaction)
+    // Auto-close after 5 seconds unless it requires interaction
     if (!options.requireInteraction) {
       setTimeout(() => notification.close(), 5000);
     }
     
     return notification;
-  } else if (Notification.permission !== 'denied') {
-    requestNotificationPermission().then(granted => {
-      if (granted) {
-        new Notification(title, options);
-      }
-    });
   }
 };
 
-// Format time for display
-const formatTime = (date) => {
-  if (!date) return 'unknown time';
-  const d = new Date(date);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+// Format time display
+const formatTimeDisplay = (timeValue) => {
+  if (!timeValue) return 'unknown time';
+  if (typeof timeValue === 'string' && timeValue.includes(':')) {
+    return timeValue;
+  }
+  if (timeValue instanceof Date) {
+    return timeValue.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return String(timeValue);
 };
 
-// Format date for display
-const formatDate = (date) => {
-  if (!date) return 'unknown date';
-  const d = new Date(date);
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+// Get current time string
+const getCurrentTime = () => {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-// Notification for task start
+// ============ TASK START NOTIFICATIONS ============
 export const notifyTaskStart = (taskTitle, startTime) => {
-  sendNotification(`⏰ Task Starting: ${taskTitle}`, {
-    body: `"${taskTitle}" is scheduled to start at ${formatTime(startTime)} on ${formatDate(startTime)}`,
-    icon: '/favicon.ico',
-    badge: '/favicon.ico',
-    tag: `task-start-${taskTitle}-${Date.now()}`,
-    silent: false
-  });
+  const formattedTime = formatTimeDisplay(startTime);
+  const currentTime = getCurrentTime();
   
-  console.log(`[Notification] Task started: ${taskTitle} at ${formatTime(startTime)}`);
+  sendNotification(`▶ Task Started: ${taskTitle}`, {
+    body: `You started "${taskTitle}" at ${currentTime}.\nScheduled: ${formattedTime}`,
+    icon: '/favicon.ico',
+    tag: `task-start-${taskTitle}-${Date.now()}`,
+    silent: false,
+    badge: '/favicon.ico'
+  });
+  console.log(`[Notification] Task started: ${taskTitle} at ${currentTime} (scheduled: ${formattedTime})`);
 };
 
-// Notification for task completion
-export const notifyTaskComplete = (taskTitle, completionType, bonus = null) => {
-  let body = `Task "${taskTitle}" marked as ${completionType}`;
-  let emoji = '✅';
+// ============ TASK COMPLETION NOTIFICATIONS ============
+export const notifyTaskComplete = (taskTitle, completionType, bonus = null, actualTime = null) => {
+  const completionTime = actualTime ? formatTimeDisplay(actualTime) : getCurrentTime();
+  let body = '';
+  let titlePrefix = '✓';
   
-  if (completionType === 'early' && bonus) {
-    emoji = '🎉';
-    body = `Great job! "${taskTitle}" completed early! Bonus: ${bonus}`;
-  } else if (completionType === 'on-time') {
-    emoji = '✅';
-    body = `"${taskTitle}" completed on time!`;
+  if (completionType === 'early') {
+    titlePrefix = '✓ Early';
+    body = `Great job! You completed "${taskTitle}" early at ${completionTime}.`;
+    if (bonus) body += ` Bonus points: ${bonus}`;
+  } else if (completionType === 'on_time' || completionType === 'on-time' || completionType === 'on_time') {
+    titlePrefix = '✓ On Time';
+    body = `Perfect timing! You completed "${taskTitle}" on time at ${completionTime}.`;
+    if (bonus) body += ` Points earned: ${bonus}`;
   } else if (completionType === 'late') {
-    emoji = '⚠️';
-    body = `"${taskTitle}" completed late. Consider planning better next time.`;
+    titlePrefix = '⚠ Late';
+    body = `Task "${taskTitle}" was completed late at ${completionTime}. Consider adjusting future estimates.`;
+    if (bonus) body += ` Points penalty: ${bonus}`;
+  } else {
+    body = `Task "${taskTitle}" completed at ${completionTime}.`;
   }
   
-  sendNotification(`${emoji} Task Complete: ${taskTitle}`, {
+  sendNotification(`${titlePrefix} Task Complete: ${taskTitle}`, {
     body,
     icon: '/favicon.ico',
-    badge: '/favicon.ico',
-    tag: `task-complete-${taskTitle}-${Date.now()}`
+    tag: `task-complete-${taskTitle}-${Date.now()}`,
+    silent: false
   });
-  
-  console.log(`[Notification] Task completed: ${taskTitle} (${completionType})`);
+  console.log(`[Notification] Task complete: ${taskTitle} (${completionType}) at ${completionTime}`);
 };
 
-// Notification for task overdue
+// ============ TASK OVERDUE NOTIFICATIONS ============
 export const notifyTaskOverdue = (taskTitle, endTime) => {
-  sendNotification(`⚠️ Task Overdue: ${taskTitle}`, {
-    body: `"${taskTitle}" was due at ${formatTime(endTime)} on ${formatDate(endTime)} and is now overdue. Please update its status.`,
-    icon: '/favicon.ico',
-    badge: '/favicon.ico',
-    tag: `task-overdue-${taskTitle}`,
-    requireInteraction: true,
-  });
+  const formattedTime = formatTimeDisplay(endTime);
+  const currentTime = getCurrentTime();
   
-  console.log(`[Notification] Task overdue: ${taskTitle} (due at ${formatTime(endTime)})`);
+  sendNotification(`⚠ OVERDUE: ${taskTitle}`, {
+    body: `Task "${taskTitle}" was due at ${formattedTime} and is now overdue (current time: ${currentTime}).\nPlease take action - reschedule or complete.`,
+    icon: '/favicon.ico',
+    tag: `task-overdue-${taskTitle}`,
+    requireInteraction: true, // Stays until user interacts
+  });
+  console.log(`[Notification] Task overdue: ${taskTitle} (due at ${formattedTime}, now ${currentTime})`);
 };
 
-// Notification for task rescheduled
-export const notifyTaskRescheduled = (taskTitle, oldStartTime, newStartTime, oldEndTime, newEndTime) => {
+// ============ TASK RESCHEDULED NOTIFICATIONS ============
+export const notifyTaskRescheduled = (taskTitle, oldStartTime, newStartTime, oldEndTime, newEndTime, newDay = null) => {
   let changes = [];
   
-  if (oldStartTime && newStartTime && new Date(oldStartTime).getTime() !== new Date(newStartTime).getTime()) {
-    changes.push(`Start: ${formatTime(oldStartTime)} → ${formatTime(newStartTime)}`);
+  if (newDay) {
+    changes.push(`Day: ${newDay}`);
   }
   
-  if (oldEndTime && newEndTime && new Date(oldEndTime).getTime() !== new Date(newEndTime).getTime()) {
-    changes.push(`End: ${formatTime(oldEndTime)} → ${formatTime(newEndTime)}`);
+  if (oldStartTime && newStartTime && oldStartTime !== newStartTime) {
+    changes.push(`Start: ${formatTimeDisplay(oldStartTime)} → ${formatTimeDisplay(newStartTime)}`);
+  }
+  
+  if (oldEndTime && newEndTime && oldEndTime !== newEndTime) {
+    changes.push(`End: ${formatTimeDisplay(oldEndTime)} → ${formatTimeDisplay(newEndTime)}`);
   }
   
   if (changes.length === 0) return;
   
-  sendNotification(`📅 Task Rescheduled: ${taskTitle}`, {
-    body: changes.join('\n'),
+  sendNotification(`↻ Task Rescheduled: ${taskTitle}`, {
+    body: `${changes.join(', ')}`,
     icon: '/favicon.ico',
-    badge: '/favicon.ico',
-    tag: `task-reschedule-${taskTitle}-${Date.now()}`
+    tag: `task-reschedule-${taskTitle}-${Date.now()}`,
+    silent: false
   });
-  
-  console.log(`[Notification] Task rescheduled: ${taskTitle}`, changes);
+  console.log(`[Notification] Task rescheduled: ${taskTitle} - ${changes.join(', ')}`);
 };
 
-// Notification for upcoming task (reminder)
-export const notifyUpcomingTask = (taskTitle, startTime, minutesBefore = 5) => {
-  sendNotification(`🔔 Upcoming Task: ${taskTitle}`, {
-    body: `"${taskTitle}" starts in ${minutesBefore} minutes at ${formatTime(startTime)}`,
+// ============ TASK CANCELLED / MISSED NOTIFICATIONS ============
+export const notifyTaskCancelled = (taskTitle, reason = 'cancelled') => {
+  const currentTime = getCurrentTime();
+  
+  sendNotification(`✗ Task ${reason === 'missed' ? 'Missed' : 'Cancelled'}: ${taskTitle}`, {
+    body: `Task "${taskTitle}" was ${reason} at ${currentTime}.${reason === 'missed' ? ' This will affect your completion metrics.' : ''}`,
     icon: '/favicon.ico',
-    badge: '/favicon.ico',
-    tag: `task-upcoming-${taskTitle}`,
+    tag: `task-cancel-${taskTitle}-${Date.now()}`,
+    silent: false
+  });
+  console.log(`[Notification] Task ${reason}: ${taskTitle} at ${currentTime}`);
+};
+
+// ============ TASK CREATED NOTIFICATION ============
+export const notifyTaskCreated = (taskTitle, day, startTime, endTime) => {
+  sendNotification(`+ New Task Created: ${taskTitle}`, {
+    body: `Task "${taskTitle}" scheduled for ${day} at ${formatTimeDisplay(startTime)} - ${formatTimeDisplay(endTime)}`,
+    icon: '/favicon.ico',
+    tag: `task-create-${taskTitle}-${Date.now()}`,
+    silent: false
+  });
+  console.log(`[Notification] Task created: ${taskTitle} on ${day} at ${startTime}`);
+};
+
+// ============ TASK EDITED NOTIFICATION ============
+export const notifyTaskEdited = (taskTitle, changes) => {
+  if (!changes || changes.length === 0) return;
+  
+  sendNotification(`✎ Task Updated: ${taskTitle}`, {
+    body: changes.join(', '),
+    icon: '/favicon.ico',
+    tag: `task-edit-${taskTitle}-${Date.now()}`,
+    silent: false
+  });
+  console.log(`[Notification] Task edited: ${taskTitle} - ${changes.join(', ')}`);
+};
+
+// ============ TASK DELETED NOTIFICATION ============
+export const notifyTaskDeleted = (taskTitle) => {
+  sendNotification(`🗑 Task Deleted: ${taskTitle}`, {
+    body: `Task "${taskTitle}" has been permanently deleted.`,
+    icon: '/favicon.ico',
+    tag: `task-delete-${taskTitle}-${Date.now()}`,
+    silent: false
+  });
+  console.log(`[Notification] Task deleted: ${taskTitle}`);
+};
+
+// ============ UPCOMING TASK REMINDER ============
+export const notifyUpcomingTask = (taskTitle, startTime, minutesBefore = 5) => {
+  const timeStr = formatTimeDisplay(startTime);
+  const currentTime = getCurrentTime();
+  let message = '';
+  
+  if (minutesBefore === 0) {
+    message = `Task "${taskTitle}" is starting NOW at ${timeStr} (current time: ${currentTime})`;
+  } else {
+    message = `Task "${taskTitle}" starts in ${minutesBefore} minutes at ${timeStr}`;
+  }
+  
+  sendNotification(`🔔 Task Reminder: ${taskTitle}`, {
+    body: message,
+    icon: '/favicon.ico',
+    tag: `task-upcoming-${taskTitle}-${minutesBefore}`,
     silent: false
   });
   
-  console.log(`[Notification] Upcoming task reminder: ${taskTitle} at ${formatTime(startTime)}`);
+  console.log(`[Notification] Upcoming task reminder: ${taskTitle} - ${message}`);
+};
+
+// ============ TASK DELAYED NOTIFICATION ============
+export const notifyTaskDelayed = (taskTitle, originalStartTime, actualStartTime, delayMinutes) => {
+  const originalFormatted = formatTimeDisplay(originalStartTime);
+  const actualFormatted = formatTimeDisplay(actualStartTime);
+  
+  sendNotification(`⏰ Task Started Late: ${taskTitle}`, {
+    body: `Task "${taskTitle}" started ${delayMinutes} minutes late.\nScheduled: ${originalFormatted}\nActual: ${actualFormatted}`,
+    icon: '/favicon.ico',
+    tag: `task-delay-${taskTitle}-${Date.now()}`,
+    silent: false
+  });
+  console.log(`[Notification] Task delayed: ${taskTitle} by ${delayMinutes} minutes`);
+};
+
+// ============ TASK COMPLETION REMINDER (for ongoing tasks) ============
+export const notifyTaskCompletionReminder = (taskTitle, endTime) => {
+  const formattedEnd = formatTimeDisplay(endTime);
+  const currentTime = getCurrentTime();
+  
+  sendNotification(`⏳ Task Ending Soon: ${taskTitle}`, {
+    body: `Task "${taskTitle}" is scheduled to end at ${formattedEnd} (current time: ${currentTime}). Don't forget to mark it complete!`,
+    icon: '/favicon.ico',
+    tag: `task-reminder-${taskTitle}`,
+    silent: false
+  });
+  console.log(`[Notification] Task completion reminder: ${taskTitle} ends at ${formattedEnd}`);
+};
+
+// ============ BATCH NOTIFICATION FOR MULTIPLE TASKS ============
+export const notifyTasksSummary = (tasks) => {
+  if (!tasks || tasks.length === 0) return;
+  
+  const pendingTasks = tasks.filter(t => t.status === 'pending');
+  const ongoingTasks = tasks.filter(t => t.status === 'active');
+  const overdueTasks = tasks.filter(t => t.status === 'pending' && t.isOverdue);
+  
+  let body = '';
+  if (overdueTasks.length > 0) {
+    body += `Overdue: ${overdueTasks.length}\n`;
+  }
+  if (ongoingTasks.length > 0) {
+    body += `In Progress: ${ongoingTasks.length}\n`;
+  }
+  if (pendingTasks.length > 0) {
+    body += `Pending: ${pendingTasks.length}\n`;
+  }
+  
+  if (body) {
+    sendNotification(`📊 Task Summary`, {
+      body: body.trim(),
+      icon: '/favicon.ico',
+      tag: `task-summary-${Date.now()}`,
+      silent: true
+    });
+    console.log(`[Notification] Task summary sent: ${body.trim()}`);
+  }
+};
+
+// ============ TIME CHECK NOTIFICATIONS (System A - Time Arrival) ============
+export const notifyTaskTimeArrived = (taskTitle, startTime) => {
+  const formattedTime = formatTimeDisplay(startTime);
+  const currentTime = getCurrentTime();
+  
+  sendNotification(`⏰ Time to Begin: ${taskTitle}`, {
+    body: `The scheduled time for "${taskTitle}" has arrived (${formattedTime}). Current time: ${currentTime}. Time to get started!`,
+    icon: '/favicon.ico',
+    tag: `task-time-${taskTitle}-${Date.now()}`,
+    requireInteraction: false,
+    silent: false
+  });
+  console.log(`[Notification] Task time arrived: ${taskTitle} at ${formattedTime}`);
+};
+
+export const notifyTaskTimeEnded = (taskTitle, endTime) => {
+  const formattedTime = formatTimeDisplay(endTime);
+  const currentTime = getCurrentTime();
+  
+  sendNotification(`⏰ Time's Up: ${taskTitle}`, {
+    body: `The scheduled time for "${taskTitle}" has ended (${formattedTime}). Current time: ${currentTime}. Time to wrap up!`,
+    icon: '/favicon.ico',
+    tag: `task-time-end-${taskTitle}-${Date.now()}`,
+    requireInteraction: false,
+    silent: false
+  });
+  console.log(`[Notification] Task time ended: ${taskTitle} at ${formattedTime}`);
+};
+
+// ============ OVERSIGHT NOTIFICATION (when task time has passed without action) ============
+export const notifyTaskOversight = (taskTitle, endTime) => {
+  const formattedTime = formatTimeDisplay(endTime);
+  const currentTime = getCurrentTime();
+  
+  sendNotification(`⚠ Task Window Closed: ${taskTitle}`, {
+    body: `Task "${taskTitle}" was scheduled to end at ${formattedTime} (current: ${currentTime}). No action was taken. The task has been marked as missed.`,
+    icon: '/favicon.ico',
+    tag: `task-oversight-${taskTitle}`,
+    requireInteraction: true
+  });
+  console.log(`[Notification] Task oversight: ${taskTitle} - window closed at ${formattedTime}`);
+};
+
+// ============ PRODUCTIVITY TIPS ============
+export const notifyProductivityTip = (taskTitle, tip) => {
+  sendNotification(`💡 Productivity Tip`, {
+    body: `While working on "${taskTitle}": ${tip}`,
+    icon: '/favicon.ico',
+    tag: `tip-${Date.now()}`,
+    silent: true
+  });
+  console.log(`[Notification] Productivity tip for ${taskTitle}: ${tip}`);
 };

@@ -7,7 +7,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
   const [subcategory, setSubcategory] = useState('');
   const [taskDay, setTaskDay] = useState(day || getCurrentDay());
   const [startTime, setStartTime] = useState(time || getCurrentTime());
-  const [endTime, setEndTime] = useState(getDefaultEndTime(time || getCurrentTime()));
+  const [endTime, setEndTime] = useState('');
   const [priority, setPriority] = useState('medium');
   const [notes, setNotes] = useState('');
 
@@ -16,7 +16,6 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     const today = new Date();
     const dayIndex = today.getDay();
-    // Convert Sunday (0) to Sunday (6) and Monday (1) to Monday (0)
     if (dayIndex === 0) return 'Sunday';
     return days[dayIndex - 1];
   }
@@ -29,16 +28,41 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
     return `${hours}:${minutes}`;
   }
 
-  // Helper to get default end time (1 hour after start)
+  // Helper to get default end time (1 hour after start) - COMPLETELY FIXED
   function getDefaultEndTime(start) {
-    const [hours, minutes] = start.split(':').map(Number);
+    // Guard against undefined or null
+    if (!start || typeof start !== 'string') {
+      const now = new Date();
+      const hours = (now.getHours() + 1).toString().padStart(2, '0');
+      const minutes = now.getMinutes().toString().padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
+    
+    const parts = start.split(':');
+    if (parts.length !== 2) {
+      const now = new Date();
+      const hours = (now.getHours() + 1).toString().padStart(2, '0');
+      const minutes = now.getMinutes().toString().padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
+    
+    const hours = parseInt(parts[0], 10);
+    const minutes = parseInt(parts[1], 10);
+    
+    if (isNaN(hours) || isNaN(minutes)) {
+      const now = new Date();
+      const endHours = (now.getHours() + 1).toString().padStart(2, '0');
+      const endMinutes = now.getMinutes().toString().padStart(2, '0');
+      return `${endHours}:${endMinutes}`;
+    }
+    
     const endHours = (hours + 1) % 24;
     return `${endHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
   }
 
-  // Auto-update end time when start time changes
+  // Initialize end time
   useEffect(() => {
-    if (!task) {
+    if (!task && startTime) {
       setEndTime(getDefaultEndTime(startTime));
     }
   }, [startTime, task]);
@@ -59,8 +83,9 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
       setCategory('Work');
       setSubcategory('');
       setTaskDay(day || getCurrentDay());
-      setStartTime(time || getCurrentTime());
-      setEndTime(getDefaultEndTime(time || getCurrentTime()));
+      const start = time || getCurrentTime();
+      setStartTime(start);
+      setEndTime(getDefaultEndTime(start));
       setPriority('medium');
       setNotes('');
     }
@@ -119,7 +144,6 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
         </div>
         
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
-          {/* Title */}
           <div>
             <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Task Title</label>
             <input
@@ -132,7 +156,6 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             />
           </div>
           
-          {/* Category & Subcategory */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Category</label>
@@ -158,7 +181,6 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             </div>
           </div>
           
-          {/* Day & Time */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
@@ -187,7 +209,6 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             </div>
           </div>
           
-          {/* End Time */}
           <div>
             <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
               <Clock size={10} /> End Time
@@ -201,7 +222,6 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             <p className="text-[8px] text-slate-500 mt-1">Default: 1 hour after start</p>
           </div>
           
-          {/* Priority */}
           <div>
             <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Priority</label>
             <div className="flex gap-2">
@@ -222,7 +242,6 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             </div>
           </div>
           
-          {/* Notes */}
           <div>
             <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Notes (Optional)</label>
             <textarea
@@ -234,7 +253,6 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             />
           </div>
           
-          {/* Actions */}
           <div className="flex gap-3 pt-2">
             <button
               type="button"

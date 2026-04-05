@@ -4,7 +4,17 @@ import { createPortal } from 'react-dom';
 import { Play, Check, RotateCcw, Edit2, X, Clock, AlertTriangle, Battery, Calendar, Ban, Target, Zap } from 'lucide-react';
 import { startTask, completeTask, rescheduleTask, updateTask, addTask } from '../../services/firebaseTaskService';
 import { TaskModal } from '../TaskModal/TaskModal';
-import { notifyTaskStart, notifyTaskComplete, notifyTaskOverdue } from '../../services/notificationService';
+import { 
+  notifyTaskStart, 
+  notifyTaskComplete, 
+  notifyTaskOverdue,
+  notifyTaskRescheduled,
+  notifyTaskCancelled,
+  notifyTaskDelayed,
+  notifyTaskTimeArrived,
+  notifyTaskTimeEnded,
+  notifyTaskOversight
+} from '../../services/notificationService';
 
 // Helper: Convert time string to minutes since midnight
 const toMinutes = (timeStr) => {
@@ -41,7 +51,8 @@ const getTimeElapsedProgress = (task, selectedDate, now) => {
 };
 
 const getCellColorState = (task, isPast, now, selectedDate) => {
-  if (isPast) return 'border-slate-600 bg-slate-800/50 opacity-60';
+  // Don't apply opacity to missed tasks - they should remain visible
+  if (isPast && task.status !== 'missed') return 'border-slate-600 bg-slate-800/50 opacity-60';
   if (task.status === 'completed') return 'border-green-500 bg-green-500/20';
   if (task.status === 'rescheduled') return 'border-yellow-500 bg-yellow-500/20';
   if (task.status === 'missed') return 'border-red-500 bg-red-500/20';
@@ -75,6 +86,25 @@ const calculatePerformanceMetrics = (task) => {
   let lateMinutes = 0;
   let delayMinutes = 0;
   let timeDeviation = 0;
+  
+  // Handle missed tasks properly
+  if (task.status === 'missed') {
+    return {
+      scheduledStart,
+      scheduledEnd,
+      actualStart: 'Not started',
+      completedAt: 'Not completed',
+      completionType: 'missed',
+      earlyMinutes: 0,
+      lateMinutes: 0,
+      delayMinutes: 0,
+      timeDeviation: 0,
+      rescheduleCount: task.rescheduleCount || 0,
+      wasEverStarted: false,
+      accuracy: 0,
+      bonus: 0
+    };
+  }
   
   if (actualStart) {
     const actualStartStr = actualStart.toTimeString().slice(0, 5);
@@ -133,6 +163,8 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const popupRef = useRef(null);
   const animationFrameRef = useRef(null);
   const overdueNotifiedRef = useRef(false);
+  const timeArrivedNotifiedRef = useRef(false);
+  const timeEndedNotifiedRef = useRef(false);
   
   // Performance metrics (System B) - calculated on demand
   const performance = calculatePerformanceMetrics(localTask);
@@ -141,7 +173,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   
   // System A: Time-elapsed animation for battery fill
   useEffect(() => {
-    if (!localTask || isPast || localTask.status === 'completed') return;
+    if (!localTask || isPast || localTask.status === 'completed' || localTask.status === 'missed') return;
     
     const updateTimeProgress = () => {
       const progress = getTimeElapsedProgress(localTask, selectedDate, new Date());
@@ -172,6 +204,42 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     return new Date() > end;
   }, [localTask, selectedDate]);
   
+  // Check if task start time has arrived
+  const isTaskTimeArrived = useCallback(() => {
+    if (!localTask || localTask.status !== 'pending') return false;
+    const start = new Date(selectedDate);
+    const [startHour, startMin] = localTask.startTime.split(':').map(Number);
+    start.setHours(startHour, startMin, 0, 0);
+    const now = new Date();
+    return now >= start;
+  }, [localTask, selectedDate]);
+  
+  // Check if task end time has arrived (for ongoing tasks)
+  const isTaskTimeEnded = useCallback(() => {
+    if (!localTask || localTask.status !== 'active') return false;
+    const end = new Date(selectedDate);
+    const [endHour, endMin] = localTask.endTime.split(':').map(Number);
+    end.setHours(endHour, endMin, 0, 0);
+    const now = new Date();
+    return now > end;
+  }, [localTask, selectedDate]);
+  
+  // Time arrived notification
+  useEffect(() => {
+    if (isTaskTimeArrived() && localTask && localTask.status === 'pending' && !timeArrivedNotifiedRef.current) {
+      notifyTaskTimeArrived(localTask.title, localTask.startTime);
+      timeArrivedNotifiedRef.current = true;
+    }
+  }, [isTaskTimeArrived, localTask]);
+  
+  // Time ended notification for ongoing tasks
+  useEffect(() => {
+    if (isTaskTimeEnded() && localTask && localTask.status === 'active' && !timeEndedNotifiedRef.current) {
+      notifyTaskTimeEnded(localTask.title, localTask.endTime);
+      timeEndedNotifiedRef.current = true;
+    }
+  }, [isTaskTimeEnded, localTask]);
+  
   // Overdue notification
   useEffect(() => {
     if (isTaskOverdue() && localTask && localTask.status === 'pending' && !overdueNotifiedRef.current) {
@@ -187,8 +255,20 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     if (!isPast && localTask && localTask.status === 'pending') {
       setIsStarting(true);
       try {
-        await startTask(localTask.id, new Date());
-        notifyTaskStart(localTask.title, localTask.startTime);
+        const actualStartTime = new Date();
+        await startTask(localTask.id, actualStartTime);
+        
+        // Check if task was started late
+        const scheduledStartMinutes = toMinutes(localTask.startTime);
+        const actualStartMinutes = actualStartTime.getHours() * 60 + actualStartTime.getMinutes();
+        const delayMinutes = actualStartMinutes - scheduledStartMinutes;
+        
+        if (delayMinutes > 0) {
+          notifyTaskDelayed(localTask.title, localTask.startTime, actualStartTime, delayMinutes);
+        } else {
+          notifyTaskStart(localTask.title, localTask.startTime);
+        }
+        
         onUpdate();
         setIsExpanded(false);
       } catch (error) {
@@ -232,7 +312,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
         completedAt
       });
       
-      notifyTaskComplete(localTask.title, completionType, bonus);
+      notifyTaskComplete(localTask.title, completionType, bonus, completedAt);
       onUpdate();
       setShowCompletionConfirm(false);
       setIsExpanded(false);
@@ -241,14 +321,19 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     }
   }, [localTask, onUpdate]);
   
-  // Reschedule - preserves work progress if any
+  // Reschedule - preserves work progress if any (works for missed tasks too)
   const handleReschedule = useCallback(async () => {
     if (!localTask) return;
     
     const wasStarted = !!localTask.actualStart;
     const workProgress = localTask.manualProgress || 0;
     
-    // Mark original as rescheduled
+    // Store old values for notification
+    const oldStartTime = localTask.startTime;
+    const oldEndTime = localTask.endTime;
+    const oldDay = localTask.day;
+    
+    // Mark original as rescheduled (or update if it was missed)
     await updateTask(localTask.id, {
       status: 'rescheduled',
       rescheduledTo: `${newDay} at ${newTime}`,
@@ -257,13 +342,14 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     });
     
     // Create new task with carried progress
+    const newEndTime = `${parseInt(newTime.split(':')[0]) + 1}:${newTime.split(':')[1]}`;
     await addTask(weekId, {
       title: localTask.title,
       category: localTask.category,
       subcategory: localTask.subcategory,
       day: newDay,
       startTime: newTime,
-      endTime: `${parseInt(newTime.split(':')[0]) + 1}:${newTime.split(':')[1]}`,
+      endTime: newEndTime,
       originalTaskId: localTask.id,
       rescheduledFrom: true,
       rescheduleCount: (localTask.rescheduleCount || 0) + 1,
@@ -272,18 +358,81 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
       cumulativeProgress: wasStarted ? workProgress : 0
     });
     
+    // Send reschedule notification
+    const dayChanged = newDay !== oldDay;
+    notifyTaskRescheduled(
+      localTask.title, 
+      oldStartTime, 
+      newTime, 
+      oldEndTime, 
+      newEndTime, 
+      dayChanged ? newDay : null
+    );
+    
     onUpdate();
     setIsExpanded(false);
     setShowReschedule(false);
+    setShowManualEntry(false);
   }, [localTask, newDay, newTime, weekId, onUpdate]);
   
   const handleCancelTask = useCallback(async () => {
     if (localTask && confirm('Cancel this task? It will be marked as missed.')) {
       await updateTask(localTask.id, { status: 'missed', completion: 0, accuracy: 0 });
+      notifyTaskCancelled(localTask.title, 'missed');
       onUpdate();
       setIsExpanded(false);
     }
   }, [localTask, onUpdate]);
+  
+  // Handle manual completion entry for missed tasks
+  const handleManualComplete = useCallback(async () => {
+    if (!manualStart || !manualEnd) {
+      alert('Please enter both start and end times');
+      return;
+    }
+    
+    try {
+      const completedAt = new Date();
+      completedAt.setHours(parseInt(manualEnd.split(':')[0]), parseInt(manualEnd.split(':')[1]), 0, 0);
+      
+      const actualStart = new Date();
+      actualStart.setHours(parseInt(manualStart.split(':')[0]), parseInt(manualStart.split(':')[1]), 0, 0);
+      
+      const scheduledEnd = localTask.endTime;
+      const scheduledEndMinutes = toMinutes(scheduledEnd);
+      const completedMinutes = toMinutes(manualEnd);
+      const diff = completedMinutes - scheduledEndMinutes;
+      
+      let completionType = 'on_time';
+      let bonus = 10;
+      if (diff < -5) {
+        completionType = 'early';
+        bonus = 15;
+      } else if (diff > 5) {
+        completionType = 'late';
+        bonus = -Math.min(30, Math.round(diff * 2));
+      }
+      
+      await updateTask(localTask.id, {
+        status: 'completed',
+        actualStart: actualStart,
+        completedAt: completedAt,
+        completionStatus: `completed_${completionType}`,
+        accuracy: bonus > 0 ? 100 - Math.abs(diff) : Math.max(0, 80 - Math.abs(diff)),
+        bonus,
+        manualEntry: true
+      });
+      
+      notifyTaskComplete(localTask.title, completionType, bonus, completedAt);
+      onUpdate();
+      setShowManualEntry(false);
+      setIsExpanded(false);
+      setManualStart('');
+      setManualEnd('');
+    } catch (error) {
+      console.error("Error recording manual completion:", error);
+    }
+  }, [localTask, manualStart, manualEnd, onUpdate]);
   
   if (!localTask) return null;
   
@@ -296,6 +445,9 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const showStartButton = isPending && !isCompleted && !isMissed && !isRescheduled && !isOngoing;
   const cellColor = getCellColorState(localTask, isPast, new Date(), selectedDate);
   const isHorizontal = viewMode === 'day';
+  
+  // Allow clicking on missed tasks (they're not truly "past" in terms of interaction)
+  const isClickable = !isPast || isMissed;
   
   const fillStyle = isHorizontal 
     ? { width: `${timeProgress}%`, height: '100%', left: 0, top: 0 }
@@ -318,45 +470,55 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
         <div className="bg-slate-800/50 rounded-lg p-3 text-center">
           <p className="text-[9px] text-slate-400 uppercase tracking-wide">Actual</p>
           <p className="text-sm font-mono font-bold text-white">
-            {performance.actualStart} → {performance.completedAt}
+            {performance.completionType === 'missed' ? '—' : `${performance.actualStart} → ${performance.completedAt}`}
           </p>
         </div>
       </div>
       
-      <div className="bg-slate-800/30 rounded-lg p-3">
-        <div className="flex justify-between items-center mb-2">
-          <span className="text-[10px] text-slate-400">Time Deviation</span>
-          <span className={`text-sm font-bold ${performance.timeDeviation < -5 ? 'text-green-400' : performance.timeDeviation > 5 ? 'text-red-400' : 'text-blue-400'}`}>
-            {performance.timeDeviation !== 0 ? `${performance.timeDeviation > 0 ? '+' : ''}${Math.round(performance.timeDeviation)} min` : 'On time'}
-          </span>
+      {performance.completionType === 'missed' ? (
+        <div className="bg-red-500/10 rounded-lg p-4 text-center">
+          <Ban size={20} className="text-red-400 mx-auto mb-2" />
+          <p className="text-sm font-bold text-red-400">Task Missed</p>
+          <p className="text-[10px] text-slate-400 mt-1">No completion recorded for this task</p>
         </div>
-        <div className="flex justify-between items-center">
-          <span className="text-[10px] text-slate-400">Delay Start</span>
-          <span className={`text-sm font-bold ${performance.delayMinutes > 0 ? 'text-orange-400' : 'text-green-400'}`}>
-            {performance.delayMinutes > 0 ? `${performance.delayMinutes} min late` : 'On time'}
-          </span>
-        </div>
-      </div>
-      
-      <div className="flex items-center justify-between bg-slate-800/30 rounded-lg p-3">
-        <div>
-          <p className="text-[9px] text-slate-400 uppercase tracking-wide">Completion Type</p>
-          <p className={`text-sm font-bold ${
-            performance.completionType === 'early' ? 'text-green-400' :
-            performance.completionType === 'on_time' ? 'text-blue-400' : 'text-red-400'
-          }`}>
-            {performance.completionType.toUpperCase()}
-            {performance.earlyMinutes > 0 && ` (${performance.earlyMinutes}m early)`}
-            {performance.lateMinutes > 0 && ` (${performance.lateMinutes}m late)`}
-          </p>
-        </div>
-        <div className="text-right">
-          <p className="text-[9px] text-slate-400 uppercase tracking-wide">Points</p>
-          <p className={`text-sm font-bold ${performance.bonus > 0 ? 'text-green-400' : performance.bonus < 0 ? 'text-red-400' : 'text-slate-400'}`}>
-            {performance.bonus > 0 ? `+${performance.bonus}` : performance.bonus}
-          </p>
-        </div>
-      </div>
+      ) : (
+        <>
+          <div className="bg-slate-800/30 rounded-lg p-3">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-[10px] text-slate-400">Time Deviation</span>
+              <span className={`text-sm font-bold ${performance.timeDeviation < -5 ? 'text-green-400' : performance.timeDeviation > 5 ? 'text-red-400' : 'text-blue-400'}`}>
+                {performance.timeDeviation !== 0 ? `${performance.timeDeviation > 0 ? '+' : ''}${Math.round(performance.timeDeviation)} min` : 'On time'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] text-slate-400">Delay Start</span>
+              <span className={`text-sm font-bold ${performance.delayMinutes > 0 ? 'text-orange-400' : 'text-green-400'}`}>
+                {performance.delayMinutes > 0 ? `${performance.delayMinutes} min late` : 'On time'}
+              </span>
+            </div>
+          </div>
+          
+          <div className="flex items-center justify-between bg-slate-800/30 rounded-lg p-3">
+            <div>
+              <p className="text-[9px] text-slate-400 uppercase tracking-wide">Completion Type</p>
+              <p className={`text-sm font-bold ${
+                performance.completionType === 'early' ? 'text-green-400' :
+                performance.completionType === 'on_time' ? 'text-blue-400' : 'text-red-400'
+              }`}>
+                {performance.completionType.toUpperCase()}
+                {performance.earlyMinutes > 0 && ` (${performance.earlyMinutes}m early)`}
+                {performance.lateMinutes > 0 && ` (${performance.lateMinutes}m late)`}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[9px] text-slate-400 uppercase tracking-wide">Points</p>
+              <p className={`text-sm font-bold ${performance.bonus > 0 ? 'text-green-400' : performance.bonus < 0 ? 'text-red-400' : 'text-slate-400'}`}>
+                {performance.bonus > 0 ? `+${performance.bonus}` : performance.bonus}
+              </p>
+            </div>
+          </div>
+        </>
+      )}
       
       {performance.rescheduleCount > 0 && (
         <div className="bg-yellow-500/10 rounded-lg p-2 text-center">
@@ -366,7 +528,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     </div>
   );
   
-  const popupContent = isExpanded && !isPast && createPortal(
+  const popupContent = isExpanded && isClickable && createPortal(
     <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }} onClick={() => setIsExpanded(false)}>
       <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-y-auto" style={{ width: '100%', maxWidth: '480px', maxHeight: '85vh' }} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
@@ -377,6 +539,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-xs text-slate-400"><Clock size={12} className="inline mr-1" />{localTask.startTime} - {localTask.endTime}</span>
                 {isOverdue && !isCompleted && <span className="text-[9px] text-red-400 bg-red-500/20 px-2 py-0.5 rounded-full">OVERDUE</span>}
+                {isMissed && <span className="text-[9px] text-red-400 bg-red-500/20 px-2 py-0.5 rounded-full">MISSED</span>}
               </div>
             </div>
             <button onClick={() => setIsExpanded(false)} className="text-slate-400 hover:text-white p-1 rounded"><X size={20} /></button>
@@ -384,18 +547,20 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
         </div>
         
         {/* System A: Time Battery Info */}
-        <div className="p-4 border-b border-white/10">
-          <div className="bg-slate-800/50 rounded-lg p-3">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-[10px] text-slate-400 flex items-center gap-1"><Battery size={10} /> Time Elapsed</span>
-              <span className="text-sm font-mono font-bold text-white">{Math.round(timeProgress)}%</span>
+        {!isMissed && (
+          <div className="p-4 border-b border-white/10">
+            <div className="bg-slate-800/50 rounded-lg p-3">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[10px] text-slate-400 flex items-center gap-1"><Battery size={10} /> Time Elapsed</span>
+                <span className="text-sm font-mono font-bold text-white">{Math.round(timeProgress)}%</span>
+              </div>
+              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div className="h-full transition-all duration-300 rounded-full" style={{ width: `${timeProgress}%`, background: getFillColor() }} />
+              </div>
+              <p className="text-[8px] text-slate-500 mt-2 text-center">Battery fill = time elapsed in scheduled window (not work progress)</p>
             </div>
-            <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-              <div className="h-full transition-all duration-300 rounded-full" style={{ width: `${timeProgress}%`, background: getFillColor() }} />
-            </div>
-            <p className="text-[8px] text-slate-500 mt-2 text-center">Battery fill = time elapsed in scheduled window (not work progress)</p>
           </div>
-        </div>
+        )}
         
         {/* System B: Performance Analytics */}
         <div className="p-4">
@@ -421,19 +586,21 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
             </button>
           )}
           
-          {!isCompleted && !isRescheduled && !isMissed && (
+          {/* Reschedule button - now shows for missed tasks too */}
+          {(!isCompleted && !isRescheduled) && (
             <button onClick={() => setShowReschedule(true)} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-yellow-600 hover:bg-yellow-700 text-white transition">
-              <RotateCcw size={14} /> Reschedule
+              <RotateCcw size={14} /> Reschedule {isMissed ? '(Missed Task)' : ''}
             </button>
           )}
           
-          {(isOverdue || isMissed) && !isCompleted && !isRescheduled && (
+          {/* Manual entry for missed/overdue tasks */}
+          {((isOverdue && !isCompleted && !isRescheduled) || isMissed) && (
             <button onClick={() => setShowManualEntry(true)} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white transition">
               <Calendar size={14} /> Record Completion (Log actual times)
             </button>
           )}
           
-          {(isOngoing || isPending) && !isCompleted && !isRescheduled && (
+          {(isOngoing || isPending) && !isCompleted && !isRescheduled && !isMissed && (
             <button onClick={handleCancelTask} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white transition">
               <Ban size={14} /> Cancel / Miss
             </button>
@@ -479,6 +646,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
       <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
         <div className="p-4 border-b bg-yellow-500/20 border-yellow-500/30">
           <h3 className="text-lg font-bold text-white">Reschedule Task</h3>
+          {isMissed && <p className="text-xs text-yellow-300 mt-1">This task was missed. Reschedule to a new time/day.</p>}
         </div>
         <div className="p-5 space-y-3">
           <select value={newDay} onChange={(e) => setNewDay(e.target.value)} className="w-full p-2 text-sm rounded-lg bg-slate-800 border border-white/10 text-white">
@@ -499,13 +667,56 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     document.body
   );
   
+  // Manual entry modal for missed/overdue tasks
+  const manualEntryContent = showManualEntry && createPortal(
+    <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.8)' }} onClick={() => setShowManualEntry(false)}>
+      <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="p-4 border-b bg-orange-500/20 border-orange-500/30">
+          <h3 className="text-lg font-bold text-white">Record Missed Task Completion</h3>
+          <p className="text-xs text-orange-300 mt-1">Enter the actual times you completed this task</p>
+        </div>
+        <div className="p-5 space-y-3">
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Actual Start Time</label>
+            <input 
+              type="time" 
+              value={manualStart} 
+              onChange={(e) => setManualStart(e.target.value)} 
+              className="w-full p-2 text-sm rounded-lg bg-slate-800 border border-white/10 text-white" 
+              placeholder="Start time"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Actual End Time</label>
+            <input 
+              type="time" 
+              value={manualEnd} 
+              onChange={(e) => setManualEnd(e.target.value)} 
+              className="w-full p-2 text-sm rounded-lg bg-slate-800 border border-white/10 text-white" 
+              placeholder="End time"
+            />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button onClick={handleManualComplete} className="flex-1 py-2 rounded-lg bg-orange-600 text-white text-sm font-semibold hover:bg-orange-700 transition">
+              Save Completion
+            </button>
+            <button onClick={() => setShowManualEntry(false)} className="flex-1 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold hover:bg-slate-600 transition">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+  
   return (
     <>
       <div className="relative h-full w-full">
         <button
-          onClick={() => !isPast && setIsExpanded(!isExpanded)}
-          className={`w-full h-14 rounded-lg border relative overflow-hidden transition-all duration-200 text-left ${!isPast ? 'cursor-pointer hover:brightness-110' : 'cursor-default'} ${cellColor}`}
-          disabled={isPast}
+          onClick={() => isClickable && setIsExpanded(!isExpanded)}
+          className={`w-full h-14 rounded-lg border relative overflow-hidden transition-all duration-200 text-left ${isClickable ? 'cursor-pointer hover:brightness-110' : 'cursor-default'} ${cellColor}`}
+          disabled={!isClickable}
         >
           {/* Time Battery Fill - System A */}
           {timeProgress > 0 && !isPast && !isMissed && !isCompleted && (
@@ -522,6 +733,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
                 {isCompleted && <Check size={10} className="text-green-500" />}
                 {isOngoing && <Zap size={10} className="text-purple-500 animate-pulse" />}
                 {isOverdue && <AlertTriangle size={10} className="text-red-500 animate-pulse" />}
+                {isMissed && <Ban size={10} className="text-red-500" />}
               </div>
             </div>
             <div className="flex items-center justify-between mt-0.5">
@@ -538,6 +750,9 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
               {performance.completionType === 'late' && isCompleted && (
                 <span className="text-[6px] text-red-400 font-bold">Late</span>
               )}
+              {isMissed && (
+                <span className="text-[6px] text-red-400 font-bold">Missed</span>
+              )}
             </div>
           </div>
         </button>
@@ -546,8 +761,23 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
       {popupContent}
       {completionConfirmContent}
       {rescheduleContent}
+      {manualEntryContent}
       
-      <TaskModal isOpen={showEditModal} onClose={() => setShowEditModal(false)} task={localTask} weekId={weekId} onUpdate={onUpdate} theme={theme} />
+      {/* FIX: Render TaskModal with createPortal to ensure it's on top */}
+      {showEditModal && createPortal(
+        <TaskModal 
+          isOpen={showEditModal} 
+          onClose={() => setShowEditModal(false)} 
+          task={localTask} 
+          weekId={weekId} 
+          onUpdate={() => {
+            onUpdate();
+            setShowEditModal(false);
+          }} 
+          theme={theme} 
+        />,
+        document.body
+      )}
     </>
   );
 }

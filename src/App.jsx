@@ -4,37 +4,31 @@ import WeekView from './components/WeekView/WeekView';
 import Dashboard from './pages/Dashboard';
 import { Login } from './components/Login/Login';
 import { LayoutDashboard, CalendarDays, Bell } from 'lucide-react';
-import { requestNotificationPermission } from './services/notificationService';
+import { requestNotificationPermission } from './components/services/notificationService';
 import './index.css';
 
 function AppContent() {
   const { user, loading, signInWithGoogle, logout, error } = useAuth();
   const [activeTab, setActiveTab] = useState('schedule');
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState('default');
 
-  // Check notification permission on load
   useEffect(() => {
-    if (user && Notification.permission === 'granted') {
-      setNotificationsEnabled(true);
-    }
-  }, [user]);
-
-  // Request notification permission when user logs in
-  useEffect(() => {
-    if (user) {
-      requestNotificationPermission();
+    // Check notification permission status on load
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+      
+      // Auto-request permissions when user is logged in
+      if (user && Notification.permission === 'default') {
+        requestNotificationPermission().then(granted => {
+          setNotificationPermission(granted ? 'granted' : 'denied');
+        });
+      }
     }
   }, [user]);
 
   const handleEnableNotifications = async () => {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      setNotificationsEnabled(true);
-      new Notification("✅ Notifications Enabled", {
-        body: "You will now receive automatic task reminders and alerts.",
-        icon: "/favicon.ico"
-      });
-    }
+    const granted = await requestNotificationPermission();
+    setNotificationPermission(granted ? 'granted' : 'denied');
   };
 
   if (loading) {
@@ -60,7 +54,7 @@ function AppContent() {
       </div>
       
       <div className="max-w-[1600px] mx-auto relative z-10">
-        <header className="mb-6 flex justify-between items-end flex-wrap gap-3">
+        <header className="mb-6 flex justify-between items-end">
           <div>
             <h1 className="text-4xl font-black italic tracking-tighter text-white">
               Life<span className="text-purple-400">OS</span>
@@ -95,20 +89,21 @@ function AppContent() {
               </button>
             </div>
             
-            {/* Notification Enable Button */}
-            {!notificationsEnabled && (
-              <button 
+            {/* Notification permission button - only show if not granted */}
+            {notificationPermission !== 'granted' && (
+              <button
                 onClick={handleEnableNotifications}
-                className="bg-green-600/20 hover:bg-green-600/30 px-3 py-2 rounded-xl text-xs text-green-400 transition flex items-center gap-1 border border-green-500/30"
+                className="bg-purple-600/20 hover:bg-purple-600/30 px-3 py-2 rounded-xl text-xs text-purple-400 transition flex items-center gap-1"
               >
-                <Bell size={12} />
+                <Bell size={14} />
                 Enable Notifications
               </button>
             )}
             
-            {notificationsEnabled && (
+            {/* Show notification status when granted */}
+            {notificationPermission === 'granted' && (
               <div className="bg-green-600/20 px-3 py-2 rounded-xl text-xs text-green-400 flex items-center gap-1">
-                <Bell size={12} />
+                <Bell size={14} />
                 Notifications ON
               </div>
             )}

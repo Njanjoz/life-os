@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2 } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
 import { TaskModal } from '../TaskModal/TaskModal';
@@ -35,6 +35,7 @@ export default function WeekView() {
   const [refreshKey, setRefreshKey] = useState(0);
   const isLoadingRef = useRef(false);
   const notifiedTasksRef = useRef(new Set());
+  const notificationIntervalRef = useRef(null);
 
   const loadWeek = useCallback(async () => {
     if (isLoadingRef.current || !user) return;
@@ -43,8 +44,6 @@ export default function WeekView() {
       const currentWeek = await getCurrentWeek(selectedDate);
       setWeek(currentWeek);
       const weekTasks = await getWeekTasks(currentWeek.id);
-      // Filter out tasks that are marked as 'rescheduled' (they are replaced by new ones)
-      // Also filter out tasks with status 'rescheduled' or 'rescheduled_with_progress'
       const activeTasks = weekTasks.filter(t => 
         t.status !== 'rescheduled' && 
         t.status !== 'rescheduled_with_progress' &&
@@ -73,94 +72,88 @@ export default function WeekView() {
 
   useEffect(() => { if (user) loadWeek(); }, [user, loadWeek, refreshKey]);
 
-  // NOTIFICATION SYSTEM - This checks every minute for tasks that need notifications
+  // ============ OPTIMIZED NOTIFICATION SYSTEM ============
   useEffect(() => {
     if (!user || !tasks.length) return;
     
-    // Request notification permission when component mounts
     requestNotificationPermission();
-    
-    // Clear notified tasks set when tasks change (new day/week)
     notifiedTasksRef.current.clear();
     
-    // Check for notifications every minute
-    const interval = setInterval(() => {
+    // Clear existing interval if any
+    if (notificationIntervalRef.current) {
+      clearInterval(notificationIntervalRef.current);
+    }
+    
+    notificationIntervalRef.current = setInterval(() => {
       const now = new Date();
       const currentTime = now.toTimeString().slice(0, 5);
       const currentDayIndex = now.getDay();
-      // Convert Sunday (0) to index 6 for our Monday-first array
       const currentDay = DAYS[currentDayIndex === 0 ? 6 : currentDayIndex - 1];
       
-      tasks.forEach(task => {
-        // Skip if task is completed, missed, or rescheduled
-        if (task.status === 'completed' || task.status === 'missed' || task.status === 'rescheduled') {
-          return;
-        }
+      // OPTIMIZATION: Only filter today's tasks once
+      const todayTasks = tasks.filter(task => 
+        task.day === currentDay && 
+        task.status === 'pending'
+      );
+      
+      if (todayTasks.length === 0) return;
+      
+      const [currentHour, currentMinute] = currentTime.split(':').map(Number);
+      const currentMinutes = currentHour * 60 + currentMinute;
+      
+      // OPTIMIZATION: Process tasks without creating Date objects repeatedly
+      for (const task of todayTasks) {
+        const [startHour, startMinute] = task.startTime.split(':').map(Number);
+        const [endHour, endMinute] = task.endTime.split(':').map(Number);
         
-        // Only check tasks for today
-        if (task.day !== currentDay) {
-          return;
-        }
-        
-        const taskStart = task.startTime;
-        const taskEnd = task.endTime;
-        
-        // Parse times for comparison
-        const [currentHour, currentMinute] = currentTime.split(':').map(Number);
-        const [startHour, startMinute] = taskStart.split(':').map(Number);
-        const [endHour, endMinute] = taskEnd.split(':').map(Number);
-        
-        const currentMinutes = currentHour * 60 + currentMinute;
         const startMinutes = startHour * 60 + startMinute;
         const endMinutes = endHour * 60 + endMinute;
-        
         const minutesUntilStart = startMinutes - currentMinutes;
         const minutesSinceEnd = currentMinutes - endMinutes;
         
-        // NOTIFICATION 1: Task starting NOW (within 1 minute)
-        if (minutesUntilStart <= 1 && minutesUntilStart >= -1 && task.status === 'pending') {
-          if (!notifiedTasksRef.current.has(`${task.id}-now`)) {
+        const taskId = task.id;
+        
+        // Task starting NOW (within 1 minute)
+        if (minutesUntilStart <= 1 && minutesUntilStart >= -1) {
+          if (!notifiedTasksRef.current.has(`${taskId}-now`)) {
             notifyUpcomingTask(task.title, task.startTime, 0);
-            notifiedTasksRef.current.add(`${task.id}-now`);
-            console.log(`[Notification] Task starting now: ${task.title}`);
+            notifiedTasksRef.current.add(`${taskId}-now`);
           }
         }
         
-        // NOTIFICATION 2: Task starting in 5 minutes
-        if (minutesUntilStart <= 5 && minutesUntilStart > 4 && task.status === 'pending') {
-          if (!notifiedTasksRef.current.has(`${task.id}-5min`)) {
+        // Task starting in 5 minutes (exact match to prevent spam)
+        if (minutesUntilStart === 5 || (minutesUntilStart > 4 && minutesUntilStart < 6)) {
+          if (!notifiedTasksRef.current.has(`${taskId}-5min`)) {
             notifyUpcomingTask(task.title, task.startTime, 5);
-            notifiedTasksRef.current.add(`${task.id}-5min`);
-            console.log(`[Notification] Task starting in 5 min: ${task.title}`);
+            notifiedTasksRef.current.add(`${taskId}-5min`);
           }
         }
         
-        // NOTIFICATION 3: Task starting in 10 minutes
-        if (minutesUntilStart <= 10 && minutesUntilStart > 9 && task.status === 'pending') {
-          if (!notifiedTasksRef.current.has(`${task.id}-10min`)) {
+        // Task starting in 10 minutes
+        if (minutesUntilStart === 10 || (minutesUntilStart > 9 && minutesUntilStart < 11)) {
+          if (!notifiedTasksRef.current.has(`${taskId}-10min`)) {
             notifyUpcomingTask(task.title, task.startTime, 10);
-            notifiedTasksRef.current.add(`${task.id}-10min`);
-            console.log(`[Notification] Task starting in 10 min: ${task.title}`);
+            notifiedTasksRef.current.add(`${taskId}-10min`);
           }
         }
         
-        // NOTIFICATION 4: Task is overdue (past end time and still pending)
-        if (minutesSinceEnd > 0 && task.status === 'pending') {
-          if (!notifiedTasksRef.current.has(`${task.id}-overdue`)) {
-            notifyTaskOverdue(task.title, task.endTime);
-            notifiedTasksRef.current.add(`${task.id}-overdue`);
-            console.log(`[Notification] Task overdue: ${task.title}`);
-          }
+        // Task is overdue
+        if (minutesSinceEnd > 0 && !notifiedTasksRef.current.has(`${taskId}-overdue`)) {
+          notifyTaskOverdue(task.title, task.endTime);
+          notifiedTasksRef.current.add(`${taskId}-overdue`);
         }
-      });
-    }, 60000); // Check every 60 seconds
+      }
+    }, 60000);
     
-    return () => clearInterval(interval);
-  }, [user, tasks]);
+    return () => {
+      if (notificationIntervalRef.current) {
+        clearInterval(notificationIntervalRef.current);
+      }
+    };
+  }, [user, tasks.length]); // Only depend on tasks.length, not full tasks array
 
   const handleRefresh = useCallback(async () => { 
     setRefreshKey(prev => prev + 1);
-    // Clear notification tracking when refreshing (new data loaded)
     notifiedTasksRef.current.clear();
   }, []);
 
@@ -168,11 +161,12 @@ export default function WeekView() {
     const newDate = new Date(selectedDate);
     newDate.setDate(selectedDate.getDate() + (direction * 7));
     setSelectedDate(newDate);
-    // Clear notification tracking when changing weeks
     notifiedTasksRef.current.clear();
   };
 
-  const getTaskAtSlot = (day, time) => tasks.find(t => t.day === day && t.startTime === time);
+  const getTaskAtSlot = useCallback((day, time) => {
+    return tasks.find(t => t.day === day && t.startTime === time);
+  }, [tasks]);
 
   const handleSlotClick = (day, time, dayDate) => {
     if (isDayPast(day) || isTimePast(day, time, dayDate)) return;
@@ -263,7 +257,7 @@ export default function WeekView() {
     }
   };
 
-  const getDayDate = (dayName) => {
+  const getDayDate = useCallback((dayName) => {
     const startOfWeek = new Date(selectedDate);
     const day = startOfWeek.getDay();
     const diff = (day === 0 ? 6 : day - 1);
@@ -272,9 +266,9 @@ export default function WeekView() {
     const targetDate = new Date(startOfWeek);
     targetDate.setDate(startOfWeek.getDate() + dayIndex);
     return targetDate;
-  };
+  }, [selectedDate]);
 
-  const formatDateRange = () => {
+  const formatDateRange = useCallback(() => {
     const startOfWeek = new Date(selectedDate);
     const day = startOfWeek.getDay();
     const diff = (day === 0 ? 6 : day - 1);
@@ -282,73 +276,88 @@ export default function WeekView() {
     const endOfWeek = new Date(startOfWeek);
     endOfWeek.setDate(startOfWeek.getDate() + 6);
     return `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  };
+  }, [selectedDate]);
 
-  const getCurrentTimePosition = () => {
+  const getCurrentTimePosition = useCallback(() => {
     const currentTime = getClockPosition();
     const slotIndex = timeSlots.findIndex(slot => slot >= currentTime.timeString);
     if (slotIndex === -1) return null;
     return { slotIndex, timeString: currentTime.timeString };
-  };
+  }, [getClockPosition, timeSlots]);
 
-  const isDayPastForDate = (date) => {
+  const isDayPastForDate = useCallback((date) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const compareDate = new Date(date);
     compareDate.setHours(0, 0, 0, 0);
     return compareDate < today;
-  };
+  }, []);
 
   const currentPos = getCurrentTimePosition();
-  const currentDayTasks = tasks.filter(t => t.day === DAYS[selectedDay]);
-  let currentDayTimes = [...new Set(currentDayTasks.map(t => t.startTime))].sort();
+  
+  // OPTIMIZATION: Memoize filtered tasks
+  const currentDayTasks = useMemo(() => 
+    tasks.filter(t => t.day === DAYS[selectedDay]), 
+    [tasks, selectedDay]
+  );
+  
+  // OPTIMIZATION: Memoize time slots calculations
+  const currentDayTimes = useMemo(() => 
+    [...new Set(currentDayTasks.map(t => t.startTime))].sort(),
+    [currentDayTasks]
+  );
 
-  const getSortedTimeSlots = (slots) => {
+  const getSortedTimeSlots = useCallback((slots) => {
     if (sortOrder === 'asc') {
       return [...slots].sort();
     } else {
       return [...slots].sort().reverse();
     }
-  };
+  }, [sortOrder]);
 
-  const sortedDayTimes = getSortedTimeSlots(currentDayTimes);
-  const sortedWeekTimes = getSortedTimeSlots(timeSlots);
+  // OPTIMIZATION: Memoize sorted time slots
+  const sortedDayTimes = useMemo(() => 
+    getSortedTimeSlots(currentDayTimes),
+    [getSortedTimeSlots, currentDayTimes]
+  );
+  
+  const sortedWeekTimes = useMemo(() => 
+    getSortedTimeSlots(timeSlots),
+    [getSortedTimeSlots, timeSlots]
+  );
 
-  const getCurrentTimeSlotIndex = () => {
+  const getCurrentTimeSlotIndex = useCallback(() => {
     const currentTime = now.getHours() * 60 + now.getMinutes();
     return sortedDayTimes.findIndex(slot => {
       const [hour, minute] = slot.split(':').map(Number);
       return hour * 60 + minute >= currentTime;
     });
-  };
+  }, [now, sortedDayTimes]);
 
   const currentSlotIndex = getCurrentTimeSlotIndex();
   const visibleCount = 3;
   const startIndex = Math.max(0, currentSlotIndex - 1);
 
-  const getVisibleTimeSlots = () => {
+  // OPTIMIZATION: Memoize visible time slots
+  const visibleDaySlots = useMemo(() => {
     if (expandedSections['dayView'] || sortedDayTimes.length <= visibleCount) {
       return sortedDayTimes;
     }
-    const visible = sortedDayTimes.slice(startIndex, startIndex + visibleCount);
-    return visible;
-  };
+    return sortedDayTimes.slice(startIndex, startIndex + visibleCount);
+  }, [expandedSections, sortedDayTimes, startIndex, visibleCount]);
 
-  const visibleDaySlots = getVisibleTimeSlots();
-  const hasMoreSlots = sortedDayTimes.length > visibleCount && !expandedSections['dayView'];
-
-  const getVisibleWeekSlots = () => {
+  const visibleWeekSlots = useMemo(() => {
     if (expandedSections['weekView'] || sortedWeekTimes.length <= visibleCount) {
       return sortedWeekTimes;
     }
     return sortedWeekTimes.slice(0, visibleCount);
-  };
+  }, [expandedSections, sortedWeekTimes, visibleCount]);
 
-  const visibleWeekSlots = getVisibleWeekSlots();
+  const hasMoreSlots = sortedDayTimes.length > visibleCount && !expandedSections['dayView'];
   const hasMoreWeekSlots = sortedWeekTimes.length > visibleCount && !expandedSections['weekView'];
 
   const toggleSortOrder = () => {
-    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
   };
 
   const toggleSection = (sectionId) => {
@@ -481,7 +490,7 @@ export default function WeekView() {
 
         {/* Time Slots Grid */}
         <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-xl overflow-hidden w-full">
-          <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : `grid-cols-${DAYS.length + 1}`} border-b border-white/10 bg-white/5 w-full`}>
+          <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-white/5 w-full`}>
             <div className="p-2 text-center text-[9px] font-bold text-slate-500 uppercase border-r border-white/5">Time</div>
             {viewMode === 'week' && DAYS.map(day => {
               const date = getDayDate(day);
@@ -509,7 +518,7 @@ export default function WeekView() {
                     <div className="p-0.5 w-full">
                       {task ? (
                         <TaskCell 
-                          key={`${task.id}_${refreshKey}`}
+                          key={task.id}
                           task={task} 
                           weekId={week?.id} 
                           now={now} 
@@ -533,20 +542,20 @@ export default function WeekView() {
                 );
               })}
               
-              {sortedDayTimes.length > visibleCount && (
+              {hasMoreSlots && (
                 <button
                   onClick={() => toggleSection('dayView')}
                   className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
                 >
-                  {expandedSections['dayView'] ? (
-                    <>
-                      <ChevronUp size={12} /> Show Less ({sortedDayTimes.length - visibleCount} hidden)
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown size={12} /> Show More ({sortedDayTimes.length - visibleCount} more time slots)
-                    </>
-                  )}
+                  <ChevronDown size={12} /> Show More ({sortedDayTimes.length - visibleCount} more time slots)
+                </button>
+              )}
+              {expandedSections['dayView'] && sortedDayTimes.length > visibleCount && (
+                <button
+                  onClick={() => toggleSection('dayView')}
+                  className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
+                >
+                  <ChevronUp size={12} /> Show Less
                 </button>
               )}
             </>
@@ -557,7 +566,7 @@ export default function WeekView() {
                 if (!hasTasks) return null;
                 
                 return (
-                  <div key={time} className={`grid grid-cols-${DAYS.length + 1} border-b border-white/10 relative w-full`}>
+                  <div key={time} className="grid grid-cols-8 border-b border-white/10 relative w-full">
                     <div className="p-1.5 border-r border-white/5 flex items-center justify-center bg-white/5">
                       <span className="text-[9px] font-mono text-slate-400">{time}</span>
                     </div>
@@ -570,7 +579,7 @@ export default function WeekView() {
                         <div key={`${day}-${time}`} className="p-0.5 w-full" onClick={() => canAdd && handleSlotClick(day, time, date)}>
                           {task ? (
                             <TaskCell 
-                              key={`${task.id}_${refreshKey}`}
+                              key={task.id}
                               task={task} 
                               weekId={week?.id} 
                               now={now} 
@@ -601,20 +610,20 @@ export default function WeekView() {
                 );
               })}
               
-              {sortedWeekTimes.length > visibleCount && (
+              {hasMoreWeekSlots && (
                 <button
                   onClick={() => toggleSection('weekView')}
                   className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
                 >
-                  {expandedSections['weekView'] ? (
-                    <>
-                      <ChevronUp size={12} /> Show Less ({sortedWeekTimes.length - visibleCount} hidden)
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown size={12} /> Show More ({sortedWeekTimes.length - visibleCount} more time slots)
-                    </>
-                  )}
+                  <ChevronDown size={12} /> Show More ({sortedWeekTimes.length - visibleCount} more time slots)
+                </button>
+              )}
+              {expandedSections['weekView'] && sortedWeekTimes.length > visibleCount && (
+                <button
+                  onClick={() => toggleSection('weekView')}
+                  className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
+                >
+                  <ChevronUp size={12} /> Show Less
                 </button>
               )}
             </>

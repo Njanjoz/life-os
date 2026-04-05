@@ -9,15 +9,22 @@ import { notifyUpcomingTask, notifyTaskOverdue, requestNotificationPermission } 
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-// ============ EXTRACTED LIGHTWEIGHT NOTIFICATION ENGINE ============
+// ============ OPTIMIZED NOTIFICATION ENGINE ============
+let lastNotificationRun = 0;
+const NOTIFICATION_THROTTLE_MS = 15000; // 15 seconds minimum between runs
+
 const runNotificationEngine = (tasks, notifiedSet) => {
-  const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const now = Date.now();
+  if (now - lastNotificationRun < NOTIFICATION_THROTTLE_MS) return;
+  lastNotificationRun = now;
   
-  const dayIndex = now.getDay();
+  const currentDate = new Date();
+  const currentMinutes = currentDate.getHours() * 60 + currentDate.getMinutes();
+  
+  const dayIndex = currentDate.getDay();
   const currentDay = DAYS[dayIndex === 0 ? 6 : dayIndex - 1];
   
-  // Single pass filter
+  // Single pass filter for today's pending tasks
   const todayTasks = [];
   for (let i = 0; i < tasks.length; i++) {
     const t = tasks[i];
@@ -31,12 +38,16 @@ const runNotificationEngine = (tasks, notifiedSet) => {
   for (let i = 0; i < todayTasks.length; i++) {
     const t = todayTasks[i];
     
-    // Parse times once
-    const [sh, sm] = t.startTime.split(':').map(Number);
-    const [eh, em] = t.endTime.split(':').map(Number);
+    // Use pre-calculated minutes if available, otherwise parse once
+    const startMinutes = t.startMinutes !== undefined ? t.startMinutes : (() => {
+      const [h, m] = t.startTime.split(':').map(Number);
+      return h * 60 + m;
+    })();
     
-    const startMinutes = sh * 60 + sm;
-    const endMinutes = eh * 60 + em;
+    const endMinutes = t.endMinutes !== undefined ? t.endMinutes : (() => {
+      const [h, m] = t.endTime.split(':').map(Number);
+      return h * 60 + m;
+    })();
     
     const minutesUntilStart = startMinutes - currentMinutes;
     const minutesSinceEnd = currentMinutes - endMinutes;
@@ -93,7 +104,14 @@ export default function WeekView() {
   const isLoadingRef = useRef(false);
   const notifiedTasksRef = useRef(new Set());
   const notificationIntervalRef = useRef(null);
-
+  const tasksRef = useRef([]); // CRITICAL: Store tasks in ref to avoid stale closure
+  
+  // Keep tasksRef updated
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+  
+  // ============ LOAD TASKS WITH PRE-CALCULATED MINUTES ============
   const loadWeek = useCallback(async () => {
     if (isLoadingRef.current || !user) return;
     isLoadingRef.current = true;
@@ -101,11 +119,26 @@ export default function WeekView() {
       const currentWeek = await getCurrentWeek(selectedDate);
       setWeek(currentWeek);
       const weekTasks = await getWeekTasks(currentWeek.id);
-      const activeTasks = weekTasks.filter(t => 
-        t.status !== 'rescheduled' && 
-        t.status !== 'rescheduled_with_progress' &&
-        !t.rescheduledTo
-      );
+      
+      // OPTIMIZATION: Pre-calculate minutes for each task
+      const activeTasks = weekTasks
+        .filter(t => 
+          t.status !== 'rescheduled' && 
+          t.status !== 'rescheduled_with_progress' &&
+          !t.rescheduledTo
+        )
+        .map(t => ({
+          ...t,
+          startMinutes: (() => {
+            const [h, m] = t.startTime.split(':').map(Number);
+            return h * 60 + m;
+          })(),
+          endMinutes: (() => {
+            const [h, m] = t.endTime.split(':').map(Number);
+            return h * 60 + m;
+          })()
+        }));
+      
       setTasks(activeTasks);
       setMetrics(currentWeek.metrics || {});
       const savedTheme = await getTheme();
@@ -140,15 +173,14 @@ export default function WeekView() {
       clearInterval(notificationIntervalRef.current);
     }
     
-    // Run once immediately
-    if (tasks.length > 0) {
-      runNotificationEngine(tasks, notifiedTasksRef.current);
+    // Run once immediately with current tasks
+    if (tasksRef.current.length > 0) {
+      runNotificationEngine(tasksRef.current, notifiedTasksRef.current);
     }
     
-    // Set up interval - only depends on user, not tasks array
+    // Set up interval with ref to avoid stale closure
     notificationIntervalRef.current = setInterval(() => {
-      // Use closure to access current tasks without re-running effect
-      runNotificationEngine(tasks, notifiedTasksRef.current);
+      runNotificationEngine(tasksRef.current, notifiedTasksRef.current);
     }, 60000);
     
     return () => {
@@ -157,14 +189,6 @@ export default function WeekView() {
       }
     };
   }, [user]); // Only depends on user, not tasks!
-
-  // Update notification engine when tasks change (without restarting interval)
-  useEffect(() => {
-    if (tasks.length > 0 && notificationIntervalRef.current) {
-      // Just update the notified set, don't restart interval
-      notifiedTasksRef.current.clear();
-    }
-  }, [tasks]);
 
   const handleRefresh = useCallback(async () => { 
     setRefreshKey(prev => prev + 1);
@@ -178,9 +202,142 @@ export default function WeekView() {
     notifiedTasksRef.current.clear();
   };
 
-  const getTaskAtSlot = useCallback((day, time) => {
-    return tasks.find(t => t.day === day && t.startTime === time);
+  const getDayDate = useCallback((dayName) => {
+    const startOfWeek = new Date(selectedDate);
+    const day = startOfWeek.getDay();
+    const diff = (day === 0 ? 6 : day - 1);
+    startOfWeek.setDate(startOfWeek.getDate() - diff);
+    const dayIndex = DAYS.indexOf(dayName);
+    const targetDate = new Date(startOfWeek);
+    targetDate.setDate(startOfWeek.getDate() + dayIndex);
+    return targetDate;
+  }, [selectedDate]);
+
+  const formatDateRange = useCallback(() => {
+    const startOfWeek = new Date(selectedDate);
+    const day = startOfWeek.getDay();
+    const diff = (day === 0 ? 6 : day - 1);
+    startOfWeek.setDate(startOfWeek.getDate() - diff);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    return `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  }, [selectedDate]);
+
+  const getCurrentTimePosition = useCallback(() => {
+    const currentTime = getClockPosition();
+    const slotIndex = timeSlots.findIndex(slot => slot >= currentTime.timeString);
+    if (slotIndex === -1) return null;
+    return { slotIndex, timeString: currentTime.timeString };
+  }, [getClockPosition, timeSlots]);
+
+  const isDayPastForDate = useCallback((date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const compareDate = new Date(date);
+    compareDate.setHours(0, 0, 0, 0);
+    return compareDate < today;
+  }, []);
+
+  const currentPos = getCurrentTimePosition();
+  
+  // ============ OPTIMIZED TASK LOOKUP (NO .find() IN LOOP) ============
+  const taskMap = useMemo(() => {
+    const map = {};
+    for (let i = 0; i < tasks.length; i++) {
+      const t = tasks[i];
+      map[`${t.day}-${t.startTime}`] = t;
+    }
+    return map;
   }, [tasks]);
+  
+  const getTaskAtSlot = useCallback((day, time) => {
+    return taskMap[`${day}-${time}`];
+  }, [taskMap]);
+  
+  // Group tasks by day for statistics
+  const tasksByDay = useMemo(() => {
+    const map = {};
+    for (let i = 0; i < tasks.length; i++) {
+      const t = tasks[i];
+      if (!map[t.day]) map[t.day] = [];
+      map[t.day].push(t);
+    }
+    return map;
+  }, [tasks]);
+  
+  const currentDayTasks = tasksByDay[DAYS[selectedDay]] || [];
+  
+  const currentDayTimes = useMemo(() => {
+    const times = [];
+    for (let i = 0; i < currentDayTasks.length; i++) {
+      times.push(currentDayTasks[i].startTime);
+    }
+    return [...new Set(times)].sort();
+  }, [currentDayTasks]);
+
+  const getSortedTimeSlots = useCallback((slots) => {
+    if (sortOrder === 'asc') {
+      return [...slots].sort();
+    } else {
+      return [...slots].sort().reverse();
+    }
+  }, [sortOrder]);
+
+  const sortedDayTimes = useMemo(() => 
+    getSortedTimeSlots(currentDayTimes),
+    [getSortedTimeSlots, currentDayTimes]
+  );
+  
+  const sortedWeekTimes = useMemo(() => 
+    getSortedTimeSlots(timeSlots),
+    [getSortedTimeSlots, timeSlots]
+  );
+
+  const getCurrentTimeSlotIndex = useCallback(() => {
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+    for (let i = 0; i < sortedDayTimes.length; i++) {
+      const [hour, minute] = sortedDayTimes[i].split(':').map(Number);
+      if (hour * 60 + minute >= currentTime) return i;
+    }
+    return -1;
+  }, [now, sortedDayTimes]);
+
+  const currentSlotIndex = getCurrentTimeSlotIndex();
+  const visibleCount = 3;
+  const startIndex = Math.max(0, currentSlotIndex - 1);
+
+  const visibleDaySlots = useMemo(() => {
+    if (expandedSections['dayView'] || sortedDayTimes.length <= visibleCount) {
+      return sortedDayTimes;
+    }
+    return sortedDayTimes.slice(startIndex, startIndex + visibleCount);
+  }, [expandedSections, sortedDayTimes, startIndex, visibleCount]);
+
+  const visibleWeekSlots = useMemo(() => {
+    if (expandedSections['weekView'] || sortedWeekTimes.length <= visibleCount) {
+      return sortedWeekTimes;
+    }
+    return sortedWeekTimes.slice(0, visibleCount);
+  }, [expandedSections, sortedWeekTimes, visibleCount]);
+
+  const hasMoreSlots = sortedDayTimes.length > visibleCount && !expandedSections['dayView'];
+  const hasMoreWeekSlots = sortedWeekTimes.length > visibleCount && !expandedSections['weekView'];
+
+  const toggleSortOrder = () => {
+    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+  };
+
+  const toggleSection = (sectionId) => {
+    setExpandedSections(prev => ({ ...prev, [sectionId]: !prev[sectionId] }));
+  };
+
+  const expandAll = () => {
+    setExpandedSections({ dayView: true, weekView: true });
+  };
+
+  const collapseAll = () => {
+    setExpandedSections({ dayView: false, weekView: false });
+  };
 
   const handleSlotClick = (day, time, dayDate) => {
     if (isDayPast(day) || isTimePast(day, time, dayDate)) return;
@@ -269,131 +426,6 @@ export default function WeekView() {
         setResetting(false);
       }
     }
-  };
-
-  const getDayDate = useCallback((dayName) => {
-    const startOfWeek = new Date(selectedDate);
-    const day = startOfWeek.getDay();
-    const diff = (day === 0 ? 6 : day - 1);
-    startOfWeek.setDate(startOfWeek.getDate() - diff);
-    const dayIndex = DAYS.indexOf(dayName);
-    const targetDate = new Date(startOfWeek);
-    targetDate.setDate(startOfWeek.getDate() + dayIndex);
-    return targetDate;
-  }, [selectedDate]);
-
-  const formatDateRange = useCallback(() => {
-    const startOfWeek = new Date(selectedDate);
-    const day = startOfWeek.getDay();
-    const diff = (day === 0 ? 6 : day - 1);
-    startOfWeek.setDate(startOfWeek.getDate() - diff);
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6);
-    return `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  }, [selectedDate]);
-
-  const getCurrentTimePosition = useCallback(() => {
-    const currentTime = getClockPosition();
-    const slotIndex = timeSlots.findIndex(slot => slot >= currentTime.timeString);
-    if (slotIndex === -1) return null;
-    return { slotIndex, timeString: currentTime.timeString };
-  }, [getClockPosition, timeSlots]);
-
-  const isDayPastForDate = useCallback((date) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const compareDate = new Date(date);
-    compareDate.setHours(0, 0, 0, 0);
-    return compareDate < today;
-  }, []);
-
-  const currentPos = getCurrentTimePosition();
-  
-  // ============ OPTIMIZED MEMOIZED CALCULATIONS ============
-  // Group tasks by day once
-  const tasksByDay = useMemo(() => {
-    const map = {};
-    for (let i = 0; i < tasks.length; i++) {
-      const t = tasks[i];
-      if (!map[t.day]) map[t.day] = [];
-      map[t.day].push(t);
-    }
-    return map;
-  }, [tasks]);
-  
-  // Get current day tasks from pre-grouped map
-  const currentDayTasks = tasksByDay[DAYS[selectedDay]] || [];
-  
-  const currentDayTimes = useMemo(() => {
-    const times = [];
-    for (let i = 0; i < currentDayTasks.length; i++) {
-      times.push(currentDayTasks[i].startTime);
-    }
-    return [...new Set(times)].sort();
-  }, [currentDayTasks]);
-
-  const getSortedTimeSlots = useCallback((slots) => {
-    if (sortOrder === 'asc') {
-      return [...slots].sort();
-    } else {
-      return [...slots].sort().reverse();
-    }
-  }, [sortOrder]);
-
-  const sortedDayTimes = useMemo(() => 
-    getSortedTimeSlots(currentDayTimes),
-    [getSortedTimeSlots, currentDayTimes]
-  );
-  
-  const sortedWeekTimes = useMemo(() => 
-    getSortedTimeSlots(timeSlots),
-    [getSortedTimeSlots, timeSlots]
-  );
-
-  const getCurrentTimeSlotIndex = useCallback(() => {
-    const currentTime = now.getHours() * 60 + now.getMinutes();
-    for (let i = 0; i < sortedDayTimes.length; i++) {
-      const [hour, minute] = sortedDayTimes[i].split(':').map(Number);
-      if (hour * 60 + minute >= currentTime) return i;
-    }
-    return -1;
-  }, [now, sortedDayTimes]);
-
-  const currentSlotIndex = getCurrentTimeSlotIndex();
-  const visibleCount = 3;
-  const startIndex = Math.max(0, currentSlotIndex - 1);
-
-  const visibleDaySlots = useMemo(() => {
-    if (expandedSections['dayView'] || sortedDayTimes.length <= visibleCount) {
-      return sortedDayTimes;
-    }
-    return sortedDayTimes.slice(startIndex, startIndex + visibleCount);
-  }, [expandedSections, sortedDayTimes, startIndex, visibleCount]);
-
-  const visibleWeekSlots = useMemo(() => {
-    if (expandedSections['weekView'] || sortedWeekTimes.length <= visibleCount) {
-      return sortedWeekTimes;
-    }
-    return sortedWeekTimes.slice(0, visibleCount);
-  }, [expandedSections, sortedWeekTimes, visibleCount]);
-
-  const hasMoreSlots = sortedDayTimes.length > visibleCount && !expandedSections['dayView'];
-  const hasMoreWeekSlots = sortedWeekTimes.length > visibleCount && !expandedSections['weekView'];
-
-  const toggleSortOrder = () => {
-    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-  };
-
-  const toggleSection = (sectionId) => {
-    setExpandedSections(prev => ({ ...prev, [sectionId]: !prev[sectionId] }));
-  };
-
-  const expandAll = () => {
-    setExpandedSections({ dayView: true, weekView: true });
-  };
-
-  const collapseAll = () => {
-    setExpandedSections({ dayView: false, weekView: false });
   };
 
   if (loading && tasks.length === 0 && !resetting) {
@@ -587,14 +619,14 @@ export default function WeekView() {
             <>
               {visibleWeekSlots.map((time) => {
                 // Check if any day has this time slot
-                let hasTasks = false;
+                let hasAnyTask = false;
                 for (let i = 0; i < DAYS.length; i++) {
                   if (getTaskAtSlot(DAYS[i], time)) {
-                    hasTasks = true;
+                    hasAnyTask = true;
                     break;
                   }
                 }
-                if (!hasTasks) return null;
+                if (!hasAnyTask) return null;
                 
                 return (
                   <div key={time} className="grid grid-cols-8 border-b border-white/10 relative w-full">

@@ -1,5 +1,6 @@
+// src/components/TaskModal/TaskModal.jsx
 import React, { useState, useEffect } from 'react';
-import { X, Clock, Calendar, Tag, AlertCircle } from 'lucide-react';
+import { X, Clock, Calendar, Tag, AlertCircle, Flag, FileText } from 'lucide-react';
 
 export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, theme, day, time }) {
   const [title, setTitle] = useState('');
@@ -28,9 +29,8 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
     return `${hours}:${minutes}`;
   }
 
-  // Helper to get default end time (1 hour after start) - COMPLETELY FIXED
+  // Helper to get default end time (1 hour after start)
   function getDefaultEndTime(start) {
-    // Guard against undefined or null
     if (!start || typeof start !== 'string') {
       const now = new Date();
       const hours = (now.getHours() + 1).toString().padStart(2, '0');
@@ -82,7 +82,9 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
       setTitle('');
       setCategory('Work');
       setSubcategory('');
+      // Use the passed day (from slot click) or current day
       setTaskDay(day || getCurrentDay());
+      // Use the passed time (from slot click) or current time
       const start = time || getCurrentTime();
       setStartTime(start);
       setEndTime(getDefaultEndTime(start));
@@ -110,6 +112,16 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
       await onSave(taskData);
     }
     onClose();
+  };
+
+  // Helper to get priority color
+  const getPriorityColor = (p) => {
+    switch(p) {
+      case 'high': return 'text-red-400';
+      case 'medium': return 'text-yellow-400';
+      case 'low': return 'text-green-400';
+      default: return 'text-slate-400';
+    }
   };
 
   if (!isOpen) return null;
@@ -144,6 +156,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
         </div>
         
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
+          {/* Task Title */}
           <div>
             <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Task Title</label>
             <input
@@ -156,9 +169,12 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             />
           </div>
           
+          {/* Category & Subcategory */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Category</label>
+              <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                <Tag size={10} /> Category
+              </label>
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
@@ -175,12 +191,13 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
                 type="text"
                 value={subcategory}
                 onChange={(e) => setSubcategory(e.target.value)}
-                placeholder="Optional"
+                placeholder="e.g., Frontend"
                 className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
               />
             </div>
           </div>
           
+          {/* Day & Start Time */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
@@ -209,6 +226,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             </div>
           </div>
           
+          {/* End Time */}
           <div>
             <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
               <Clock size={10} /> End Time
@@ -222,8 +240,11 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             <p className="text-[8px] text-slate-500 mt-1">Default: 1 hour after start</p>
           </div>
           
+          {/* Priority */}
           <div>
-            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Priority</label>
+            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <Flag size={10} /> Priority
+            </label>
             <div className="flex gap-2">
               {priorities.map(p => (
                 <button
@@ -242,8 +263,11 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             </div>
           </div>
           
+          {/* Notes */}
           <div>
-            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Notes (Optional)</label>
+            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <FileText size={10} /> Notes
+            </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -251,6 +275,28 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
               rows={3}
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none resize-none"
             />
+          </div>
+          
+          {/* Preview of how task will appear */}
+          <div className="bg-slate-800/50 rounded-lg p-3 border border-white/10">
+            <p className="text-[8px] text-slate-400 uppercase tracking-wider mb-2">Preview</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`text-[10px] font-medium ${getPriorityColor(priority)}`}>
+                {priority === 'high' ? '🔴 High' : priority === 'medium' ? '🟡 Medium' : '🟢 Low'}
+              </span>
+              <span className="text-[9px] text-slate-500">•</span>
+              <span className="text-[9px] text-slate-400">{taskDay}</span>
+              <span className="text-[9px] text-slate-500">•</span>
+              <span className="text-[9px] text-slate-400">{startTime}-{endTime}</span>
+              {subcategory && (
+                <>
+                  <span className="text-[9px] text-slate-500">•</span>
+                  <span className="text-[9px] text-slate-400">{subcategory}</span>
+                </>
+              )}
+            </div>
+            <p className="text-[11px] text-white mt-1 truncate">{title || 'Task title will appear here'}</p>
+            {notes && <p className="text-[8px] text-slate-500 mt-1 truncate">📝 {notes.substring(0, 50)}</p>}
           </div>
           
           <div className="flex gap-3 pt-2">

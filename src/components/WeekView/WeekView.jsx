@@ -1,4 +1,4 @@
-// src/components/WeekView/WeekView.jsx - FULLY OPTIMIZED - WITH PRINT
+// src/components/WeekView/WeekView.jsx - FULLY OPTIMIZED - WITH DAY LOCKING
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2, Printer } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
@@ -442,10 +442,8 @@ export default function WeekView() {
     const firebaseUser = auth.currentUser;
     const userName = firebaseUser?.displayName || firebaseUser?.email || 'User';
     
-    // Calculate week number
     const weekNumber = Math.ceil((new Date(selectedDate) - new Date(selectedDate.getFullYear(), 0, 1)) / 86400000 / 7);
     
-    // Get all unique times from tasks
     const allTimes = [...new Set(tasks.map(t => t.startTime))].sort();
     if (allTimes.length === 0) {
       for (let hour = 8; hour <= 20; hour++) {
@@ -459,111 +457,24 @@ export default function WeekView() {
       <head>
         <title>LifeOS Timetable - ${formatDateRange()}</title>
         <style>
-          * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-          }
-          
-          @page {
-            size: landscape;
-            margin: 0.3in;
-          }
-          
-          body {
-            font-family: 'Courier New', 'Monaco', monospace;
-            background: white;
-            color: black;
-            padding: 0;
-            margin: 0;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          
-          .container {
-            width: 100%;
-            height: 100%;
-          }
-          
-          .header {
-            text-align: center;
-            margin-bottom: 12px;
-            padding-bottom: 6px;
-            border-bottom: 2px solid #000;
-          }
-          
-          .header h1 {
-            font-size: 18px;
-            letter-spacing: 2px;
-            margin: 0;
-          }
-          
-          .header p {
-            font-size: 9px;
-            color: #444;
-            margin: 2px 0;
-          }
-          
-          .user-info {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 12px;
-            padding: 5px 8px;
-            background: #f5f5f5;
-            font-size: 8px;
-            border: 1px solid #ccc;
-          }
-          
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 7px;
-          }
-          
-          th {
-            background: #2c2c2c;
-            color: white;
-            padding: 5px 2px;
-            border: 1px solid #444;
-            font-weight: bold;
-          }
-          
-          td {
-            border: 1px solid #ccc;
-            padding: 4px 2px;
-            vertical-align: top;
-          }
-          
-          .time-col {
-            width: 40px;
-            background: #f9f9f9;
-            font-weight: bold;
-            text-align: center;
-          }
-          
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          @page { size: landscape; margin: 0.3in; }
+          body { font-family: 'Courier New', 'Monaco', monospace; background: white; color: black; padding: 0; margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .container { width: 100%; height: 100%; }
+          .header { text-align: center; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 2px solid #000; }
+          .header h1 { font-size: 18px; letter-spacing: 2px; margin: 0; }
+          .header p { font-size: 9px; color: #444; margin: 2px 0; }
+          .user-info { display: flex; justify-content: space-between; margin-bottom: 12px; padding: 5px 8px; background: #f5f5f5; font-size: 8px; border: 1px solid #ccc; }
+          table { width: 100%; border-collapse: collapse; font-size: 7px; }
+          th { background: #2c2c2c; color: white; padding: 5px 2px; border: 1px solid #444; font-weight: bold; }
+          td { border: 1px solid #ccc; padding: 4px 2px; vertical-align: top; }
+          .time-col { width: 40px; background: #f9f9f9; font-weight: bold; text-align: center; }
           .status-completed { color: #2e7d32; }
           .status-active { color: #ed6c02; }
           .status-missed { color: #d32f2f; }
           .status-pending { color: #0288d1; }
-          
-          .footer {
-            margin-top: 12px;
-            padding-top: 6px;
-            border-top: 1px solid #ccc;
-            font-size: 7px;
-            text-align: center;
-            color: #666;
-          }
-          
-          @media print {
-            body {
-              margin: 0;
-              padding: 0;
-            }
-            .no-print {
-              display: none;
-            }
-          }
+          .footer { margin-top: 12px; padding-top: 6px; border-top: 1px solid #ccc; font-size: 7px; text-align: center; color: #666; }
+          @media print { body { margin: 0; padding: 0; } .no-print { display: none; } }
         </style>
       </head>
       <body>
@@ -572,49 +483,31 @@ export default function WeekView() {
             <button onclick="window.print()" style="padding: 5px 10px; font-size: 11px; margin-right: 8px;">🖨️ Print / Save PDF</button>
             <button onclick="window.close()" style="padding: 5px 10px; font-size: 11px;">✖ Close</button>
           </div>
-          
           <div class="header">
             <h1>📋 LIFEOS TIMETABLE</h1>
             <p>${formatDateRange()} | Week #${weekNumber}</p>
           </div>
-          
           <div class="user-info">
             <div><strong>Name:</strong> ${userName}</div>
             <div><strong>Generated:</strong> ${new Date().toLocaleString()}</div>
             <div><strong>Tasks:</strong> ${tasks.filter(t => t.status === 'completed').length}/${tasks.length} completed</div>
           </div>
-          
           <table>
             <thead>
-              <tr>
-                <th class="time-col">Time</th>
-                ${DAYS.map(day => `<th>${day.slice(0, 3)}<br><span style="font-size:6px;font-weight:normal;">${getDayDate(day).toLocaleDateString()}</span></th>`).join('')}
-              </tr>
+              <tr><th class="time-col">Time</th>${DAYS.map(day => `<th>${day.slice(0, 3)}<br><span style="font-size:6px;font-weight:normal;">${getDayDate(day).toLocaleDateString()}</span></th>`).join('')}</tr>
             </thead>
             <tbody>
-              ${allTimes.map(time => `
-                <tr>
+              ${allTimes.map(time => {
+                return `<tr>
                   <td class="time-col">${time}</td>
                   ${DAYS.map(day => {
                     const task = tasks.find(t => t.day === day && t.startTime === time);
-                    return `
-                      <td>
-                        ${task ? `
-                          <strong>${task.title.length > 20 ? task.title.substring(0, 18) + '..' : task.title}</strong><br>
-                          ${task.startTime}-${task.endTime}<br>
-                          <span class="status-${task.status}">
-                            ${task.status === 'completed' ? '✓ Done' : task.status === 'active' ? '▶ Active' : task.status === 'missed' ? '✗ Missed' : '○ Pending'}
-                          </span>
-                          ${task.notes ? `<br><span style="font-size:6px;color:#666;">📝 ${task.notes.substring(0, 25)}</span>` : ''}
-                        ` : '—'}
-                      </td>
-                    `;
+                    return `<td>${task ? `<strong>${task.title.length > 20 ? task.title.substring(0, 18) + '..' : task.title}</strong><br>${task.startTime}-${task.endTime}<br><span class="status-${task.status}">${task.status === 'completed' ? '✓ Done' : task.status === 'active' ? '▶ Active' : task.status === 'missed' ? '✗ Missed' : '○ Pending'}</span>${task.notes ? `<br><span style="font-size:6px;color:#666;">📝 ${task.notes.substring(0, 25)}</span>` : ''}</td>` : '<td>—</td>'}`;
                   }).join('')}
-                </tr>
-              `).join('')}
+                </tr>`;
+              }).join('')}
             </tbody>
           </table>
-          
           <div class="footer">
             <p>LifeOS - Time Management System | Print this timetable and fill in tasks manually during offline periods</p>
           </div>
@@ -622,7 +515,6 @@ export default function WeekView() {
       </body>
       </html>
     `);
-    
     printWindow.document.close();
   };
 
@@ -687,11 +579,7 @@ export default function WeekView() {
                 <button onClick={() => setViewMode('week')} className={`p-1.5 rounded-lg transition ${viewMode === 'week' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
                   <Grid size={14} />
                 </button>
-                <button 
-                  onClick={printWeeklyTimetable}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-white transition"
-                  title="Print Weekly Timetable"
-                >
+                <button onClick={printWeeklyTimetable} className="p-1.5 rounded-lg text-slate-400 hover:text-white transition" title="Print Weekly Timetable">
                   <Printer size={14} />
                 </button>
                 <div className="relative">
@@ -700,66 +588,42 @@ export default function WeekView() {
                   </button>
                   {showFilterMenu && (
                     <div className="absolute right-0 top-full mt-1 bg-slate-800 rounded-lg border border-white/10 shadow-lg z-20 min-w-[180px]">
-                      <button 
-                        onClick={toggleSortOrder} 
-                        disabled={isSorting}
-                        className="w-full px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2 disabled:opacity-50"
-                      >
-                        {isSorting ? (
-                          <>
-                            <div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
-                            Sorting...
-                          </>
-                        ) : (
-                          <>
-                            <ArrowUpDown size={12} />
-                            Sort: {sortOrder === 'asc' ? 'Earliest First' : 'Latest First'}
-                          </>
-                        )}
+                      <button onClick={toggleSortOrder} disabled={isSorting} className="w-full px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2 disabled:opacity-50">
+                        {isSorting ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> Sorting...</> : <><ArrowUpDown size={12} /> Sort: {sortOrder === 'asc' ? 'Earliest First' : 'Latest First'}</>}
                       </button>
                       <button onClick={expandAll} className="w-full px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
-                        <ChevronDown size={12} />
-                        Expand All
+                        <ChevronDown size={12} /> Expand All
                       </button>
                       <button onClick={collapseAll} className="w-full px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
-                        <ChevronUp size={12} />
-                        Collapse All
+                        <ChevronUp size={12} /> Collapse All
                       </button>
                       <div className="h-px bg-white/10 my-1" />
                       <button onClick={handleResetWeek} disabled={resetting} className="w-full px-3 py-2 text-left text-xs text-yellow-400 hover:bg-yellow-500/10 transition flex items-center gap-2">
-                        <Trash2 size={12} />
-                        Reset This Week
+                        <Trash2 size={12} /> Reset This Week
                       </button>
                       <button onClick={handleResetAll} disabled={resetting} className="w-full px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 transition flex items-center gap-2">
-                        <RotateCcw size={12} />
-                        Complete Reset (All Data)
+                        <RotateCcw size={12} /> Complete Reset (All Data)
                       </button>
                     </div>
                   )}
                 </div>
-                <button onClick={() => setShowAddModal(true)} className="p-1.5 rounded-lg text-white bg-purple-600 hover:bg-purple-700"><Plus size={14} /></button>
+                <button 
+                  onClick={() => setShowAddModal(true)} 
+                  className="p-1.5 rounded-lg text-white bg-purple-600 hover:bg-purple-700"
+                  title={`Add task for ${DAYS[selectedDay]}`}
+                >
+                  <Plus size={14} />
+                </button>
               </div>
             </div>
           </div>
 
           {/* Stats Row */}
           <div className="grid grid-cols-4 gap-1.5">
-            <div className="bg-white/5 rounded-lg p-1.5 text-center">
-              <p className="text-[8px] text-slate-400">Score</p>
-              <p className="text-sm font-bold text-white">{metrics.weeklyScore || 0}</p>
-            </div>
-            <div className="bg-white/5 rounded-lg p-1.5 text-center">
-              <p className="text-[8px] text-slate-400">Complete</p>
-              <p className="text-sm font-bold text-white">{metrics.completionRate || 0}%</p>
-            </div>
-            <div className="bg-white/5 rounded-lg p-1.5 text-center">
-              <p className="text-[8px] text-slate-400">Discipline</p>
-              <p className="text-sm font-bold text-white">{metrics.disciplineScore || 0}</p>
-            </div>
-            <div className="bg-white/5 rounded-lg p-1.5 text-center">
-              <p className="text-[8px] text-slate-400">Delay</p>
-              <p className="text-sm font-bold text-orange-400">{metrics.avgDelay || 0}m</p>
-            </div>
+            <div className="bg-white/5 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Score</p><p className="text-sm font-bold text-white">{metrics.weeklyScore || 0}</p></div>
+            <div className="bg-white/5 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Complete</p><p className="text-sm font-bold text-white">{metrics.completionRate || 0}%</p></div>
+            <div className="bg-white/5 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Discipline</p><p className="text-sm font-bold text-white">{metrics.disciplineScore || 0}</p></div>
+            <div className="bg-white/5 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Delay</p><p className="text-sm font-bold text-orange-400">{metrics.avgDelay || 0}m</p></div>
           </div>
 
           {/* Week Navigation */}
@@ -854,26 +718,17 @@ export default function WeekView() {
                 
                 {hasMoreSlots && (
                   <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
-                    <button
-                      onClick={loadMoreSlots}
-                      className="flex-1 py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-purple-500/10 rounded-lg"
-                    >
+                    <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-purple-500/10 rounded-lg">
                       <ChevronDown size={12} /> Load {LOAD_MORE_STEP} More ({sortedDayTimes.length - visibleSlotCount} remaining)
                     </button>
-                    <button
-                      onClick={loadAllSlots}
-                      className="py-2 px-3 text-center text-[10px] text-slate-400 hover:text-white transition flex items-center justify-center gap-1 bg-white/5 rounded-lg"
-                    >
+                    <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-slate-400 hover:text-white transition flex items-center justify-center gap-1 bg-white/5 rounded-lg">
                       Load All ({sortedDayTimes.length})
                     </button>
                   </div>
                 )}
                 
                 {expandedSections['dayView'] && visibleSlotCount > WINDOW_SIZE && (
-                  <button
-                    onClick={() => setVisibleSlotCount(WINDOW_SIZE)}
-                    className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
-                  >
+                  <button onClick={() => setVisibleSlotCount(WINDOW_SIZE)} className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10">
                     <ChevronUp size={12} /> Show Less (back to {WINDOW_SIZE} slots)
                   </button>
                 )}
@@ -937,26 +792,17 @@ export default function WeekView() {
                 
                 {hasMoreWeekSlots && (
                   <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
-                    <button
-                      onClick={loadMoreSlots}
-                      className="flex-1 py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-purple-500/10 rounded-lg"
-                    >
+                    <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-purple-500/10 rounded-lg">
                       <ChevronDown size={12} /> Load {LOAD_MORE_STEP} More ({sortedWeekTimes.length - visibleSlotCount} remaining)
                     </button>
-                    <button
-                      onClick={loadAllSlots}
-                      className="py-2 px-3 text-center text-[10px] text-slate-400 hover:text-white transition flex items-center justify-center gap-1 bg-white/5 rounded-lg"
-                    >
+                    <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-slate-400 hover:text-white transition flex items-center justify-center gap-1 bg-white/5 rounded-lg">
                       Load All ({sortedWeekTimes.length})
                     </button>
                   </div>
                 )}
                 
                 {expandedSections['weekView'] && visibleSlotCount > WINDOW_SIZE && (
-                  <button
-                    onClick={() => setVisibleSlotCount(WINDOW_SIZE)}
-                    className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10"
-                  >
+                  <button onClick={() => setVisibleSlotCount(WINDOW_SIZE)} className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10">
                     <ChevronUp size={12} /> Show Less (back to {WINDOW_SIZE} slots)
                   </button>
                 )}
@@ -969,13 +815,32 @@ export default function WeekView() {
             <div className="bg-white/5 rounded-xl p-6 text-center">
               <Calendar size={24} className="text-slate-500 mx-auto mb-2" />
               <p className="text-xs text-slate-400">No tasks for {DAYS[selectedDay]}</p>
-              <button onClick={() => setShowAddModal(true)} className="mt-2 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs">Add Task</button>
+              <button 
+                onClick={() => setShowAddModal(true)} 
+                className="mt-2 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs"
+              >
+                Add Task
+              </button>
             </div>
           )}
 
-          {/* Modals */}
-          <TaskModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSave={handleAddTask} theme={theme} />
-          <TaskModal isOpen={showSlotModal} onClose={() => { setShowSlotModal(false); setSelectedSlot(null); }} day={selectedSlot?.day} time={selectedSlot?.time} onSave={handleAddTaskToSlot} theme={theme} />
+          {/* FIXED: TaskModal now receives the current selected day */}
+          <TaskModal 
+            isOpen={showAddModal} 
+            onClose={() => setShowAddModal(false)} 
+            onSave={handleAddTask} 
+            theme={theme}
+            day={DAYS[selectedDay]}
+          />
+          
+          <TaskModal 
+            isOpen={showSlotModal} 
+            onClose={() => { setShowSlotModal(false); setSelectedSlot(null); }} 
+            day={selectedSlot?.day} 
+            time={selectedSlot?.time} 
+            onSave={handleAddTaskToSlot} 
+            theme={theme} 
+          />
           
           {showThemeModal && (
             <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">

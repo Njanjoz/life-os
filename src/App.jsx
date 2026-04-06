@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import WeekView from './components/WeekView/WeekView';
 import Dashboard from './pages/Dashboard';
+import Timetable from './components/Timetable/Timetable';
 import { Login } from './components/Login/Login';
-import { LayoutDashboard, CalendarDays, Bell } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, Bell, Printer } from 'lucide-react';
 import { requestNotificationPermission } from './services/notificationService';
 import './index.css';
 
@@ -93,6 +94,17 @@ function AppContent() {
                 <LayoutDashboard size={14} />
                 Dashboard
               </button>
+              <button
+                onClick={() => setActiveTab('timetable')}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs transition ${
+                  activeTab === 'timetable' 
+                    ? 'bg-purple-600 text-white' 
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Printer size={14} />
+                Timetable
+              </button>
             </div>
             
             {/* Notification Enable Button */}
@@ -125,7 +137,9 @@ function AppContent() {
           </div>
         </header>
         
-        {activeTab === 'schedule' ? <WeekView /> : <Dashboard />}
+        {activeTab === 'schedule' && <WeekView />}
+        {activeTab === 'dashboard' && <Dashboard />}
+        {activeTab === 'timetable' && <Timetable />}
       </div>
     </div>
   );

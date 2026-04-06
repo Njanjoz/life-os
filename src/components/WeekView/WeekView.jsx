@@ -1,11 +1,12 @@
-// src/components/WeekView/WeekView.jsx - FULLY OPTIMIZED - NO FREEZE
+// src/components/WeekView/WeekView.jsx - FULLY OPTIMIZED - WITH PRINT
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2 } from 'lucide-react';
+import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2, Printer } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
 import { TaskModal } from '../TaskModal/TaskModal';
 import { useRealTimeClock } from '../../hooks/useRealTimeClock';
 import { getCurrentWeek, getWeekTasks, addTask, updateWeekMetrics, checkMissedTasks, getBestFocusHours, getTheme, updateTheme, getTimeSlots, updateTimeSlots, resetAllUserData, deleteAllTasksForWeek } from '../../services/firebaseTaskService';
 import { useAuth } from '../../context/AuthContext';
+import { auth } from '../../firebase';
 import { notifyUpcomingTask, notifyTaskOverdue, requestNotificationPermission } from '../../services/notificationService';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -435,6 +436,196 @@ export default function WeekView() {
     sortedCacheRef.current = {};
   };
 
+  // ============ PRINT WEEKLY TIMETABLE FUNCTION ============
+  const printWeeklyTimetable = () => {
+    const printWindow = window.open('', '_blank');
+    const firebaseUser = auth.currentUser;
+    const userName = firebaseUser?.displayName || firebaseUser?.email || 'User';
+    
+    // Calculate week number
+    const weekNumber = Math.ceil((new Date(selectedDate) - new Date(selectedDate.getFullYear(), 0, 1)) / 86400000 / 7);
+    
+    // Get all unique times from tasks
+    const allTimes = [...new Set(tasks.map(t => t.startTime))].sort();
+    if (allTimes.length === 0) {
+      for (let hour = 8; hour <= 20; hour++) {
+        allTimes.push(`${hour.toString().padStart(2, '0')}:00`);
+      }
+    }
+    
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>LifeOS Timetable - ${formatDateRange()}</title>
+        <style>
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+          
+          @page {
+            size: landscape;
+            margin: 0.3in;
+          }
+          
+          body {
+            font-family: 'Courier New', 'Monaco', monospace;
+            background: white;
+            color: black;
+            padding: 0;
+            margin: 0;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          
+          .container {
+            width: 100%;
+            height: 100%;
+          }
+          
+          .header {
+            text-align: center;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #000;
+          }
+          
+          .header h1 {
+            font-size: 18px;
+            letter-spacing: 2px;
+            margin: 0;
+          }
+          
+          .header p {
+            font-size: 9px;
+            color: #444;
+            margin: 2px 0;
+          }
+          
+          .user-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding: 5px 8px;
+            background: #f5f5f5;
+            font-size: 8px;
+            border: 1px solid #ccc;
+          }
+          
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 7px;
+          }
+          
+          th {
+            background: #2c2c2c;
+            color: white;
+            padding: 5px 2px;
+            border: 1px solid #444;
+            font-weight: bold;
+          }
+          
+          td {
+            border: 1px solid #ccc;
+            padding: 4px 2px;
+            vertical-align: top;
+          }
+          
+          .time-col {
+            width: 40px;
+            background: #f9f9f9;
+            font-weight: bold;
+            text-align: center;
+          }
+          
+          .status-completed { color: #2e7d32; }
+          .status-active { color: #ed6c02; }
+          .status-missed { color: #d32f2f; }
+          .status-pending { color: #0288d1; }
+          
+          .footer {
+            margin-top: 12px;
+            padding-top: 6px;
+            border-top: 1px solid #ccc;
+            font-size: 7px;
+            text-align: center;
+            color: #666;
+          }
+          
+          @media print {
+            body {
+              margin: 0;
+              padding: 0;
+            }
+            .no-print {
+              display: none;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="no-print" style="margin-bottom: 10px;">
+            <button onclick="window.print()" style="padding: 5px 10px; font-size: 11px; margin-right: 8px;">🖨️ Print / Save PDF</button>
+            <button onclick="window.close()" style="padding: 5px 10px; font-size: 11px;">✖ Close</button>
+          </div>
+          
+          <div class="header">
+            <h1>📋 LIFEOS TIMETABLE</h1>
+            <p>${formatDateRange()} | Week #${weekNumber}</p>
+          </div>
+          
+          <div class="user-info">
+            <div><strong>Name:</strong> ${userName}</div>
+            <div><strong>Generated:</strong> ${new Date().toLocaleString()}</div>
+            <div><strong>Tasks:</strong> ${tasks.filter(t => t.status === 'completed').length}/${tasks.length} completed</div>
+          </div>
+          
+          <table>
+            <thead>
+              <tr>
+                <th class="time-col">Time</th>
+                ${DAYS.map(day => `<th>${day.slice(0, 3)}<br><span style="font-size:6px;font-weight:normal;">${getDayDate(day).toLocaleDateString()}</span></th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${allTimes.map(time => `
+                <tr>
+                  <td class="time-col">${time}</td>
+                  ${DAYS.map(day => {
+                    const task = tasks.find(t => t.day === day && t.startTime === time);
+                    return `
+                      <td>
+                        ${task ? `
+                          <strong>${task.title.length > 20 ? task.title.substring(0, 18) + '..' : task.title}</strong><br>
+                          ${task.startTime}-${task.endTime}<br>
+                          <span class="status-${task.status}">
+                            ${task.status === 'completed' ? '✓ Done' : task.status === 'active' ? '▶ Active' : task.status === 'missed' ? '✗ Missed' : '○ Pending'}
+                          </span>
+                          ${task.notes ? `<br><span style="font-size:6px;color:#666;">📝 ${task.notes.substring(0, 25)}</span>` : ''}
+                        ` : '—'}
+                      </td>
+                    `;
+                  }).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          
+          <div class="footer">
+            <p>LifeOS - Time Management System | Print this timetable and fill in tasks manually during offline periods</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+    
+    printWindow.document.close();
+  };
+
   const handleResetWeek = async () => {
     if (confirm('⚠️ WARNING: This will delete ALL tasks for the current week only.\n\nYour settings and other weeks will remain.\n\nThis action cannot be undone.\n\nAre you sure you want to reset this week?')) {
       setResetting(true);
@@ -495,6 +686,13 @@ export default function WeekView() {
                 </button>
                 <button onClick={() => setViewMode('week')} className={`p-1.5 rounded-lg transition ${viewMode === 'week' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
                   <Grid size={14} />
+                </button>
+                <button 
+                  onClick={printWeeklyTimetable}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white transition"
+                  title="Print Weekly Timetable"
+                >
+                  <Printer size={14} />
                 </button>
                 <div className="relative">
                   <button onClick={() => setShowFilterMenu(!showFilterMenu)} className="p-1.5 rounded-lg text-slate-400 hover:text-white transition">

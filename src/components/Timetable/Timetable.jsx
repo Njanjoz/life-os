@@ -180,8 +180,10 @@ export default function Timetable() {
     if (!printTimes.length) for (let h = 6; h <= 22; h++) printTimes.push(`${String(h).padStart(2, '0')}:00`);
     
     const rows = printTimes.length;
-    const basePx = Math.max(5.5, Math.min(9, Math.floor(105 / rows)));
-    const rowMinH = Math.max(40, Math.min(70, Math.floor(600 / rows)));
+    // Dynamic scaling based on number of rows
+    const baseFontSize = Math.max(5.5, Math.min(9, Math.floor(110 / rows)));
+    const rowHeight = Math.max(32, Math.min(50, Math.floor(550 / rows)));
+    const headerFontSize = Math.max(16, Math.min(24, 26 - Math.floor(rows / 6)));
     const weekQuote = QUOTES[weekNumber % QUOTES.length];
     
     win.document.write(`
@@ -193,74 +195,312 @@ export default function Timetable() {
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    @page { size: landscape; margin: 0.2in; }
+    /* NO forced orientation - user chooses in print dialog */
+    @page { 
+      margin: 0.15in;
+    }
     body {
       background: #faf8f5;
       font-family: 'Cormorant Garamond', serif;
       color: #2c2418;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
-      padding: 12px;
+      padding: 0;
+      margin: 0;
+      width: 100%;
     }
-    .print-buttons { display: flex; justify-content: center; gap: 10px; margin-bottom: 15px; }
-    .print-buttons button { padding: 8px 20px; border: none; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600; font-family: 'Inter', sans-serif; }
+    .print-buttons { 
+      display: flex; 
+      justify-content: center; 
+      gap: 10px; 
+      margin-bottom: 10px; 
+      padding: 8px;
+    }
+    .print-buttons button { 
+      padding: 8px 20px; 
+      border: none; 
+      border-radius: 6px; 
+      font-size: 12px; 
+      cursor: pointer; 
+      font-weight: 600; 
+      font-family: 'Inter', sans-serif; 
+    }
     .btn-print { background: #8b7355; color: white; }
     .btn-close { background: #e8e0d5; color: #5c4a32; }
     @media print { .print-buttons { display: none; } }
     
-    .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #c9a53b; }
-    .title h1 { font-size: 28px; font-weight: 700; color: #2c2418; letter-spacing: 2px; font-family: 'Playfair Display', serif; }
-    .title p { font-size: 8px; color: #8b7355; letter-spacing: 0.3em; margin-top: 2px; font-family: 'Inter', sans-serif; text-transform: uppercase; }
+    .container { 
+      width: 100%; 
+      max-width: 100%;
+      margin: 0 auto;
+    }
+    
+    .header { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: flex-end; 
+      margin-bottom: 8px; 
+      padding-bottom: 5px; 
+      border-bottom: 2px solid #c9a53b; 
+    }
+    .title h1 { 
+      font-size: ${headerFontSize}px; 
+      font-weight: 700; 
+      color: #2c2418; 
+      letter-spacing: 1.5px; 
+      font-family: 'Playfair Display', serif; 
+      margin: 0;
+    }
+    .title p { 
+      font-size: 7px; 
+      color: #8b7355; 
+      letter-spacing: 0.25em; 
+      margin-top: 2px; 
+      font-family: 'Inter', sans-serif; 
+      text-transform: uppercase; 
+    }
     .week-info { text-align: right; }
-    .week-number { font-size: 11px; color: #c9a53b; font-weight: 600; font-family: 'Playfair Display', serif; }
-    .date-range { font-size: 8px; color: #8b7355; margin-top: 2px; font-family: 'Inter', sans-serif; }
-    .user-name { font-size: 10px; color: #5c4a32; margin-top: 4px; font-family: 'Inter', sans-serif; }
+    .week-number { 
+      font-size: 11px; 
+      color: #c9a53b; 
+      font-weight: 600; 
+      font-family: 'Playfair Display', serif; 
+    }
+    .date-range { 
+      font-size: 8px; 
+      color: #8b7355; 
+      margin-top: 2px; 
+      font-family: 'Inter', sans-serif; 
+    }
+    .user-name { 
+      font-size: 9px; 
+      color: #5c4a32; 
+      margin-top: 4px; 
+      font-family: 'Inter', sans-serif; 
+    }
     
-    .manual-stats { display: flex; gap: 20px; margin-bottom: 12px; padding: 10px; background: #f5f0ea; border-radius: 8px; border: 1px solid #d4c5b0; flex-wrap: wrap; justify-content: space-around; }
+    .manual-stats { 
+      display: flex; 
+      gap: 20px; 
+      margin-bottom: 10px; 
+      padding: 8px 12px; 
+      background: #f5f0ea; 
+      border-radius: 8px; 
+      border: 1px solid #d4c5b0; 
+      flex-wrap: wrap; 
+      justify-content: space-around; 
+    }
     .manual-stat { text-align: center; }
-    .manual-stat .label { font-size: 7px; color: #8b7355; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; font-family: 'Inter', sans-serif; }
-    .manual-stat .blank-line { width: 60px; border-bottom: 1px solid #d4c5b0; margin: 0 auto; padding: 4px 0; }
+    .manual-stat .label { 
+      font-size: 7px; 
+      color: #8b7355; 
+      text-transform: uppercase; 
+      letter-spacing: 0.1em; 
+      margin-bottom: 4px; 
+      font-family: 'Inter', sans-serif; 
+    }
+    .manual-stat .blank-line { 
+      width: 60px; 
+      border-bottom: 1px solid #d4c5b0; 
+      margin: 0 auto; 
+      padding: 4px 0; 
+    }
     
-    .quote-section { background: #f5f0ea; border-left: 3px solid #c9a53b; padding: 8px 12px; margin-bottom: 12px; border-radius: 8px; }
-    .quote-text { font-size: 10px; font-style: italic; color: #4a3720; font-family: 'Playfair Display', serif; }
-    .quote-author { font-size: 7px; color: #c9a53b; margin-top: 4px; font-family: 'Inter', sans-serif; letter-spacing: 0.05em; }
+    .quote-section { 
+      background: #f5f0ea; 
+      border-left: 3px solid #c9a53b; 
+      padding: 8px 12px; 
+      margin-bottom: 10px; 
+      border-radius: 8px; 
+    }
+    .quote-text { 
+      font-size: 10px; 
+      font-style: italic; 
+      color: #4a3720; 
+      font-family: 'Playfair Display', serif; 
+    }
+    .quote-author { 
+      font-size: 7px; 
+      color: #c9a53b; 
+      margin-top: 4px; 
+      font-family: 'Inter', sans-serif; 
+      letter-spacing: 0.05em; 
+    }
     
-    .checklist-row { display: flex; gap: 16px; margin-bottom: 12px; padding: 8px 12px; background: #f5f0ea; border-radius: 8px; border: 1px solid #d4c5b0; flex-wrap: wrap; }
+    .checklist-row { 
+      display: flex; 
+      gap: 16px; 
+      margin-bottom: 10px; 
+      padding: 8px 12px; 
+      background: #f5f0ea; 
+      border-radius: 8px; 
+      border: 1px solid #d4c5b0; 
+      flex-wrap: wrap; 
+    }
     .checklist-day { display: flex; align-items: center; gap: 6px; }
-    .check-box { width: 12px; height: 12px; border: 1.5px solid #c9a53b; border-radius: 2px; display: inline-block; background: white; }
-    .checklist-day label { font-size: 8px; font-weight: 500; color: #5c4a32; text-transform: uppercase; font-family: 'Inter', sans-serif; letter-spacing: 0.05em; }
+    .check-box { 
+      width: 12px; 
+      height: 12px; 
+      border: 1.5px solid #c9a53b; 
+      border-radius: 2px; 
+      display: inline-block; 
+      background: white; 
+    }
+    .checklist-day label { 
+      font-size: 8px; 
+      font-weight: 500; 
+      color: #5c4a32; 
+      text-transform: uppercase; 
+      font-family: 'Inter', sans-serif; 
+      letter-spacing: 0.05em; 
+    }
     
-    table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
-    th { background: #e8e0d5; padding: 6px 3px; border-bottom: 1px solid #d4c5b0; font-weight: 600; font-size: 9px; text-align: center; color: #4a3720; font-family: 'Playfair Display', serif; letter-spacing: 0.05em; }
-    td { border-right: 1px solid #e8e0d5; border-bottom: 1px solid #f0ebe5; vertical-align: top; padding: 4px; }
+    table { 
+      width: 100%; 
+      border-collapse: collapse; 
+      margin-bottom: 10px; 
+    }
+    th { 
+      background: #e8e0d5; 
+      padding: 5px 3px; 
+      border-bottom: 1px solid #d4c5b0; 
+      font-weight: 600; 
+      font-size: 8px; 
+      text-align: center; 
+      color: #4a3720; 
+      font-family: 'Playfair Display', serif; 
+      letter-spacing: 0.05em; 
+    }
+    td { 
+      border-right: 1px solid #e8e0d5; 
+      border-bottom: 1px solid #f0ebe5; 
+      vertical-align: top; 
+      padding: 3px; 
+    }
     td:last-child { border-right: none; }
-    .time-col { width: 38px; background: #faf8f5; text-align: center; vertical-align: middle; }
-    .time-text { font-family: 'Playfair Display', serif; font-size: ${Math.max(6, basePx - 1)}px; color: #8b7355; font-weight: 500; }
-    .task-cell { display: flex; flex-direction: column; gap: 4px; min-height: ${rowMinH}px; }
-    .task-card { border-left: 2px solid; border-radius: 4px; padding: 4px 6px; background: white; border: 1px solid #e8e0d5; border-left-width: 3px; }
-    .task-title { font-size: ${Math.max(7, basePx)}px; font-weight: 600; color: #2c2418; margin-bottom: 2px; font-family: 'Playfair Display', serif; letter-spacing: 0.02em; }
-    .task-time { font-family: 'Inter', sans-serif; font-size: ${Math.max(5, basePx - 1.5)}px; color: #8b7355; margin-bottom: 4px; }
+    .time-col { 
+      width: 35px; 
+      background: #faf8f5; 
+      text-align: center; 
+      vertical-align: middle; 
+    }
+    .time-text { 
+      font-family: 'Playfair Display', serif; 
+      font-size: ${Math.max(6, baseFontSize - 1)}px; 
+      color: #8b7355; 
+      font-weight: 500; 
+    }
+    .task-cell { 
+      display: flex; 
+      flex-direction: column; 
+      gap: 3px; 
+      min-height: ${rowHeight}px; 
+    }
+    .task-card { 
+      border-left: 2px solid; 
+      border-radius: 4px; 
+      padding: 3px 5px; 
+      background: white; 
+      border: 0.5px solid #e8e0d5; 
+      border-left-width: 2px; 
+    }
+    .task-title { 
+      font-size: ${Math.max(7, baseFontSize)}px; 
+      font-weight: 600; 
+      color: #2c2418; 
+      margin-bottom: 1px; 
+      font-family: 'Playfair Display', serif; 
+      letter-spacing: 0.02em; 
+    }
+    .task-time { 
+      font-family: 'Inter', sans-serif; 
+      font-size: ${Math.max(5, baseFontSize - 1.5)}px; 
+      color: #8b7355; 
+      margin-bottom: 2px; 
+    }
     
-    .task-options { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
-    .option-row { display: flex; align-items: center; gap: 6px; }
-    .option-box { width: 10px; height: 10px; border: 1px solid #c9a53b; border-radius: 2px; display: inline-block; background: white; flex-shrink: 0; }
-    .option-label { font-size: ${Math.max(5, basePx - 2)}px; color: #5c4a32; font-family: 'Inter', sans-serif; }
-    .reschedule-time { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; }
-    .reschedule-time .time-blank { width: 25px; border-bottom: 1px solid #d4c5b0; display: inline-block; }
+    .task-options { 
+      display: flex; 
+      flex-direction: column; 
+      gap: 2px; 
+      margin-top: 2px; 
+    }
+    .option-row { display: flex; align-items: center; gap: 5px; }
+    .option-box { 
+      width: 9px; 
+      height: 9px; 
+      border: 1px solid #c9a53b; 
+      border-radius: 1px; 
+      display: inline-block; 
+      background: white; 
+      flex-shrink: 0; 
+    }
+    .option-label { 
+      font-size: ${Math.max(5, baseFontSize - 2)}px; 
+      color: #5c4a32; 
+      font-family: 'Inter', sans-serif; 
+    }
+    .reschedule-time { display: inline-flex; align-items: center; gap: 3px; margin-left: 5px; }
+    .reschedule-time .time-blank { width: 22px; border-bottom: 0.5px solid #d4c5b0; display: inline-block; }
     
-    .notes-section { margin-top: 12px; padding: 10px; background: #f5f0ea; border-radius: 8px; border: 1px solid #d4c5b0; }
-    .notes-title { font-size: 9px; font-weight: 600; color: #c9a53b; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.2em; font-family: 'Inter', sans-serif; }
-    .notes-lines { display: flex; flex-direction: column; gap: 8px; }
-    .note-line { border-bottom: 1px dashed #d4c5b0; padding-bottom: 6px; min-height: 22px; }
-    
-    .manual-scoring { margin-top: 12px; padding: 10px; background: #f5f0ea; border-radius: 8px; border: 1px solid #d4c5b0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .manual-scoring { 
+      margin-top: 8px; 
+      padding: 8px 12px; 
+      background: #f5f0ea; 
+      border-radius: 8px; 
+      border: 1px solid #d4c5b0; 
+      display: grid; 
+      grid-template-columns: repeat(3, 1fr); 
+      gap: 12px; 
+    }
     .score-item { text-align: center; }
-    .score-item .label { font-size: 7px; color: #8b7355; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; font-family: 'Inter', sans-serif; }
-    .score-item .blank-box { width: 80px; margin: 0 auto; border-bottom: 1px solid #d4c5b0; padding: 4px 0; }
-    .score-item .stars { display: flex; justify-content: center; gap: 8px; margin-top: 4px; }
-    .score-item .star { width: 12px; height: 12px; border: 1px solid #c9a53b; border-radius: 1px; background: white; }
+    .score-item .label { 
+      font-size: 7px; 
+      color: #8b7355; 
+      text-transform: uppercase; 
+      letter-spacing: 0.1em; 
+      margin-bottom: 4px; 
+      font-family: 'Inter', sans-serif; 
+    }
+    .score-item .blank-box { 
+      width: 70px; 
+      margin: 0 auto; 
+      border-bottom: 0.5px solid #d4c5b0; 
+      padding: 3px 0; 
+    }
+    .score-item .stars { display: flex; justify-content: center; gap: 6px; margin-top: 3px; }
+    .score-item .star { width: 10px; height: 10px; border: 0.5px solid #c9a53b; border-radius: 1px; background: white; }
     
-    .footer { margin-top: 10px; display: flex; justify-content: space-between; align-items: center; padding-top: 6px; border-top: 1px solid #e8e0d5; font-size: 6px; color: #8b7355; font-family: 'Inter', sans-serif; }
+    .notes-section { 
+      margin-top: 8px; 
+      padding: 8px 12px; 
+      background: #f5f0ea; 
+      border-radius: 8px; 
+      border: 1px solid #d4c5b0; 
+    }
+    .notes-title { 
+      font-size: 8px; 
+      font-weight: 600; 
+      color: #c9a53b; 
+      margin-bottom: 4px; 
+      text-transform: uppercase; 
+      letter-spacing: 0.15em; 
+      font-family: 'Inter', sans-serif; 
+    }
+    .notes-lines { display: flex; flex-direction: column; gap: 5px; }
+    .note-line { border-bottom: 0.5px dashed #d4c5b0; padding-bottom: 4px; min-height: 18px; }
+    
+    .footer { 
+      margin-top: 8px; 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      padding-top: 5px; 
+      border-top: 0.5px solid #e8e0d5; 
+      font-size: 6px; 
+      color: #8b7355; 
+      font-family: 'Inter', sans-serif; 
+    }
   </style>
 </head>
 <body>
@@ -270,129 +510,131 @@ export default function Timetable() {
   <button class="btn-close" onclick="window.close()">✖ Close</button>
 </div>
 
-<div class="header">
-  <div class="title">
-    <h1>LIFEOS TIMETABLE</h1>
-    <p>Time Architecture • Discipline • Performance</p>
+<div class="container">
+  <div class="header">
+    <div class="title">
+      <h1>LIFEOS TIMETABLE</h1>
+      <p>Time Architecture • Discipline • Performance</p>
+    </div>
+    <div class="week-info">
+      <div class="week-number">Week ${weekNumber}</div>
+      <div class="date-range">${formatDateRange()}</div>
+      <div class="user-name">${userName}</div>
+    </div>
   </div>
-  <div class="week-info">
-    <div class="week-number">Week ${weekNumber}</div>
-    <div class="date-range">${formatDateRange()}</div>
-    <div class="user-name">${userName}</div>
+
+  <div class="manual-stats">
+    <div class="manual-stat"><div class="label">TASKS COMPLETED</div><div class="blank-line"></div></div>
+    <div class="manual-stat"><div class="label">TASKS MISSED</div><div class="blank-line"></div></div>
+    <div class="manual-stat"><div class="label">RESCHEDULED</div><div class="blank-line"></div></div>
+    <div class="manual-stat"><div class="label">TOTAL TASKS</div><div class="blank-line"></div></div>
+    <div class="manual-stat"><div class="label">COMPLETION %</div><div class="blank-line"></div></div>
   </div>
-</div>
 
-<div class="manual-stats">
-  <div class="manual-stat"><div class="label">TASKS COMPLETED</div><div class="blank-line"></div></div>
-  <div class="manual-stat"><div class="label">TASKS MISSED</div><div class="blank-line"></div></div>
-  <div class="manual-stat"><div class="label">RESCHEDULED</div><div class="blank-line"></div></div>
-  <div class="manual-stat"><div class="label">TOTAL TASKS</div><div class="blank-line"></div></div>
-  <div class="manual-stat"><div class="label">COMPLETION %</div><div class="blank-line"></div></div>
-</div>
+  <div class="quote-section">
+    <div class="quote-text">“${weekQuote.text}”</div>
+    <div class="quote-author">${weekQuote.author}</div>
+  </div>
 
-<div class="quote-section">
-  <div class="quote-text">“${weekQuote.text}”</div>
-  <div class="quote-author">${weekQuote.author}</div>
-</div>
+  <div class="checklist-row">
+    ${DAYS.map(day => `<div class="checklist-day"><span class="check-box"></span><label>${day.slice(0, 3)}</label></div>`).join('')}
+    <div class="checklist-day"><span class="check-box"></span><label>ALL DONE</label></div>
+  </div>
 
-<div class="checklist-row">
-  ${DAYS.map(day => `<div class="checklist-day"><span class="check-box"></span><label>${day.slice(0, 3)}</label></div>`).join('')}
-  <div class="checklist-day"><span class="check-box"></span><label>ALL DONE</label></div>
-</div>
-
-<table>
-  <thead>
-    <tr>
-      <th class="time-col">TIME</th>
-      ${DAYS.map(day => `<th>${day.slice(0, 3)}<br><span style="font-size:6px;font-weight:normal;">${getDayDate(day).toLocaleDateString()}</span></th>`).join('')}
-    </tr>
-  </thead>
-  <tbody>
-    ${printTimes.map(time => `
+  <table>
+    <thead>
       <tr>
-        <td class="time-col"><span class="time-text">${time}</span></td>
-        ${DAYS.map(day => {
-          const task = tasks.find(t => t.day === day && t.startTime === time);
-          const taskColor = task ? (titleColor[task.title] || '#c9a53b') : '#d4c5b0';
-          return `
-            <td>
-              <div class="task-cell">
-                ${task ? `
-                  <div class="task-card" style="border-left-color: ${taskColor};">
-                    <div class="task-title">${task.title.length > 22 ? task.title.substring(0, 20) + '..' : task.title}</div>
-                    <div class="task-time">${task.startTime}–${task.endTime}</div>
-                    <div class="task-options">
-                      <div class="option-row">
-                        <span class="option-box"></span>
-                        <span class="option-label">✓ Done</span>
-                      </div>
-                      <div class="option-row">
-                        <span class="option-box"></span>
-                        <span class="option-label">✗ Missed</span>
-                      </div>
-                      <div class="option-row">
-                        <span class="option-box"></span>
-                        <span class="option-label">↻ Moved to</span>
-                        <span class="reschedule-time"><span class="time-blank"></span> : <span class="time-blank"></span></span>
-                      </div>
-                    </div>
-                    ${task.notes ? `<div style="font-size:${Math.max(5, basePx - 2)}px; color:#8b7355; margin-top:4px;">✒️ ${task.notes.substring(0, 35)}</div>` : ''}
-                  </div>
-                ` : `
-                  <div style="display:flex; align-items:center; justify-content:center; height:${rowMinH}px; opacity:0.3;">
-                    <span class="option-box"></span>
-                    <span class="option-label" style="margin-left:6px;">Free slot</span>
-                  </div>
-                `}
-              </div>
-            </td>
-          `;
-        }).join('')}
+        <th class="time-col">TIME</th>
+        ${DAYS.map(day => `<th>${day.slice(0, 3)}<br><span style="font-size:6px;font-weight:normal;">${getDayDate(day).toLocaleDateString()}</span></th>`).join('')}
       </tr>
-    `).join('')}
-  </tbody>
-</table>
+    </thead>
+    <tbody>
+      ${printTimes.map(time => `
+        <tr>
+          <td class="time-col"><span class="time-text">${time}</span></td>
+          ${DAYS.map(day => {
+            const task = tasks.find(t => t.day === day && t.startTime === time);
+            const taskColor = task ? (titleColor[task.title] || '#c9a53b') : '#d4c5b0';
+            return `
+              <td>
+                <div class="task-cell">
+                  ${task ? `
+                    <div class="task-card" style="border-left-color: ${taskColor};">
+                      <div class="task-title">${task.title.length > 20 ? task.title.substring(0, 18) + '..' : task.title}</div>
+                      <div class="task-time">${task.startTime}–${task.endTime}</div>
+                      <div class="task-options">
+                        <div class="option-row">
+                          <span class="option-box"></span>
+                          <span class="option-label">✓ Done</span>
+                        </div>
+                        <div class="option-row">
+                          <span class="option-box"></span>
+                          <span class="option-label">✗ Missed</span>
+                        </div>
+                        <div class="option-row">
+                          <span class="option-box"></span>
+                          <span class="option-label">↻ Moved to</span>
+                          <span class="reschedule-time"><span class="time-blank"></span> : <span class="time-blank"></span></span>
+                        </div>
+                      </div>
+                      ${task.notes ? `<div style="font-size:${Math.max(4.5, baseFontSize - 2)}px; color:#8b7355; margin-top:2px;">✒️ ${task.notes.substring(0, 30)}</div>` : ''}
+                    </div>
+                  ` : `
+                    <div style="display:flex; align-items:center; justify-content:center; height:${rowHeight}px; opacity:0.3;">
+                      <span class="option-box"></span>
+                      <span class="option-label" style="margin-left:5px;">Free slot</span>
+                    </div>
+                  `}
+                </div>
+              </td>
+            `;
+          }).join('')}
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
 
-<div class="manual-scoring">
-  <div class="score-item">
-    <div class="label">DISCIPLINE SCORE</div>
-    <div class="blank-box"></div>
-    <div class="stars">
-      <span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span>
+  <div class="manual-scoring">
+    <div class="score-item">
+      <div class="label">DISCIPLINE SCORE</div>
+      <div class="blank-box"></div>
+      <div class="stars">
+        <span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span>
+      </div>
+    </div>
+    <div class="score-item">
+      <div class="label">FOCUS SCORE</div>
+      <div class="blank-box"></div>
+      <div class="stars">
+        <span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span>
+      </div>
+    </div>
+    <div class="score-item">
+      <div class="label">OVERALL RATING</div>
+      <div class="blank-box"></div>
+      <div class="stars">
+        <span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span>
+      </div>
     </div>
   </div>
-  <div class="score-item">
-    <div class="label">FOCUS SCORE</div>
-    <div class="blank-box"></div>
-    <div class="stars">
-      <span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span>
+
+  <div class="notes-section">
+    <div class="notes-title">WEEKLY NOTES & REFLECTIONS</div>
+    <div class="notes-lines">
+      <div class="note-line"></div>
+      <div class="note-line"></div>
+      <div class="note-line"></div>
+      <div class="note-line"></div>
+      <div class="note-line"></div>
+      <div class="note-line"></div>
     </div>
   </div>
-  <div class="score-item">
-    <div class="label">OVERALL RATING</div>
-    <div class="blank-box"></div>
-    <div class="stars">
-      <span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span><span class="star"></span>
-    </div>
-  </div>
-</div>
 
-<div class="notes-section">
-  <div class="notes-title">WEEKLY NOTES & REFLECTIONS</div>
-  <div class="notes-lines">
-    <div class="note-line"></div>
-    <div class="note-line"></div>
-    <div class="note-line"></div>
-    <div class="note-line"></div>
-    <div class="note-line"></div>
-    <div class="note-line"></div>
+  <div class="footer">
+    <span>LifeOS — Time Management System</span>
+    <span>${firstName}'s Planner</span>
+    <span>✧ Tick boxes with pen | Fill in moved time | Rate your week ✧</span>
   </div>
-</div>
-
-<div class="footer">
-  <span>LifeOS — Time Management System</span>
-  <span>${firstName}'s Planner</span>
-  <span>✧ Tick boxes with pen | Fill in moved time | Rate your week ✧</span>
 </div>
 
 </body>

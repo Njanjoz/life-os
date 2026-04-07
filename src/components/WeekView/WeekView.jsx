@@ -1,10 +1,10 @@
-// src/components/WeekView/WeekView.jsx - FULLY FUNCTIONAL (Mobile Scrolling + Desktop Clickable)
+// src/components/WeekView/WeekView.jsx - FULLY FUNCTIONAL (Fixed setBestHours error)
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Calendar, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2, Check, Zap, Ban } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2 } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
 import { TaskModal } from '../TaskModal/TaskModal';
 import { useRealTimeClock } from '../../hooks/useRealTimeClock';
-import { getCurrentWeek, getWeekTasks, addTask, updateWeekMetrics, checkMissedTasks, getBestFocusHours, getTheme, updateTheme, getTimeSlots, updateTimeSlots, resetAllUserData, deleteAllTasksForWeek, updateTask } from '../../services/firebaseTaskService';
+import { getCurrentWeek, getWeekTasks, addTask, updateWeekMetrics, checkMissedTasks, getTheme, updateTheme, getTimeSlots, updateTimeSlots, resetAllUserData, deleteAllTasksForWeek } from '../../services/firebaseTaskService';
 import { useAuth } from '../../context/AuthContext';
 import { notifyUpcomingTask, notifyTaskOverdue, requestNotificationPermission } from '../../services/notificationService';
 
@@ -204,9 +204,6 @@ export default function WeekView() {
       
       const updatedMetrics = await updateWeekMetrics(currentWeek.id);
       if (updatedMetrics && isMountedRef.current) setMetrics(updatedMetrics);
-      
-      const hours = await getBestFocusHours();
-      if (hours && isMountedRef.current) setBestHours(hours);
       
     } catch (error) {
       console.error('Load week error:', error);
@@ -715,7 +712,7 @@ export default function WeekView() {
   }
 
   // ================================================================
-  // DESKTOP RENDER - FULLY FUNCTIONAL WITH CLICKABLE CELLS
+  // DESKTOP RENDER - FULLY FUNCTIONAL
   // ================================================================
   return (
     <div className="w-full max-w-full overflow-x-auto pb-20 relative">
@@ -821,7 +818,7 @@ export default function WeekView() {
           </div>
         )}
         
-        {/* Time Grid - FULLY CLICKABLE */}
+        {/* Time Grid */}
         <div className="bg-slate-900/60 border border-white/10 rounded-xl overflow-hidden w-full backdrop-blur-sm">
           <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-slate-900/40`}>
             <div className="p-2 text-center text-[10px] font-bold text-slate-500 uppercase border-r border-white/10">Time</div>

@@ -1,4 +1,4 @@
-// src/components/WeekView/WeekView.jsx - COMPLETE FULLY FIXED VERSION
+// src/components/WeekView/WeekView.jsx - ONLY 3 FIXES (Keep everything else the same)
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Calendar, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2, Check, Zap, Ban } from 'lucide-react';
 import { TaskModal } from '../TaskModal/TaskModal';
@@ -126,9 +126,9 @@ const MobileTaskCell = ({ task, onUpdate }) => {
         </div>
       </button>
       
-      {/* FIXED: Higher z-index and proper positioning */}
+      {/* FIX 1: Higher z-index for popup to appear above taskbar */}
       {showConfirm && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/90" onClick={() => setShowConfirm(false)}>
+        <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/90" onClick={() => setShowConfirm(false)}>
           <div className="bg-black rounded-xl border border-white/20 p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <p className="text-sm text-white mb-4">Complete "{task.title}"?</p>
             <div className="flex gap-3">
@@ -142,7 +142,7 @@ const MobileTaskCell = ({ task, onUpdate }) => {
   );
 };
 
-// Desktop Task Cell
+// Desktop Task Cell - FIX 3: Make clickable
 const DesktopTaskCell = ({ task, onUpdate, theme }) => {
   const [showConfirm, setShowConfirm] = useState(false);
   
@@ -160,7 +160,9 @@ const DesktopTaskCell = ({ task, onUpdate, theme }) => {
     return null;
   };
   
-  const handleClick = async () => {
+  const handleClick = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (task.status === 'completed') return;
     if (task.status === 'pending' || task.status === 'active') {
       setShowConfirm(true);
@@ -177,7 +179,7 @@ const DesktopTaskCell = ({ task, onUpdate, theme }) => {
     <>
       <button
         onClick={handleClick}
-        className={`w-full h-14 rounded-lg border relative overflow-hidden text-left transition-all hover:brightness-110 ${getStatusColor()}`}
+        className={`w-full h-14 rounded-lg border relative overflow-hidden text-left transition-all hover:brightness-110 cursor-pointer ${getStatusColor()}`}
       >
         <div className="relative z-10 p-1.5 h-full flex flex-col justify-between">
           <div className="flex items-center justify-between">
@@ -196,7 +198,7 @@ const DesktopTaskCell = ({ task, onUpdate, theme }) => {
       </button>
       
       {showConfirm && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/80" onClick={() => setShowConfirm(false)}>
+        <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/80" onClick={() => setShowConfirm(false)}>
           <div className="bg-slate-900 rounded-xl border border-white/20 p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <p className="text-sm text-white mb-4">Complete "{task.title}"?</p>
             <div className="flex gap-3">
@@ -548,15 +550,16 @@ export default function WeekView() {
   }
   
   // ================================================================
-  // MOBILE B&W LITE RENDER - WITH VERTICAL SCROLLING
+  // MOBILE B&W LITE RENDER - FIX 2: Added proper scrolling
   // ================================================================
   if (isMobileDevice) {
     return (
-      <div className="h-screen flex flex-col bg-black overflow-hidden">
-        {/* Fixed Header - Doesn't scroll */}
-        <div className="flex-shrink-0 p-3 space-y-3 border-b border-white/10">
-          {/* Top Bar */}
-          <div className="bg-black rounded-xl p-3 border border-white/10">
+      // FIX 2: Changed to allow scrolling
+      <div className="w-full h-screen bg-black overflow-y-auto">
+        <div className="p-3 space-y-3 pb-32">
+          
+          {/* Top Bar - KEPT EXACTLY THE SAME */}
+          <div className="bg-black rounded-xl p-3 border border-white/10 sticky top-0 z-20">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <Clock size={14} className="text-white" />
@@ -666,45 +669,80 @@ export default function WeekView() {
               })}
             </div>
           )}
-        </div>
-        
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto px-3 pb-20">
-          <div className="space-y-3">
-            {/* Time Grid */}
-            <div className="bg-black border border-white/20 rounded-xl overflow-hidden w-full">
-              <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-white/5 sticky top-0 z-10`}>
-                <div className="p-2 text-center text-[9px] font-bold text-white/60 uppercase border-r border-white/10">Time</div>
-                {viewMode === 'week' && DAYS.map(day => {
-                  const date = getDayDate(day);
-                  const isPastDay = isDayInPast(date);
+          
+          {/* Time Grid - KEPT EXACTLY THE SAME */}
+          <div className="bg-black border border-white/20 rounded-xl overflow-hidden w-full">
+            <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-white/5 sticky top-0 z-10`}>
+              <div className="p-2 text-center text-[9px] font-bold text-white/60 uppercase border-r border-white/10">Time</div>
+              {viewMode === 'week' && DAYS.map(day => {
+                const date = getDayDate(day);
+                const isPastDay = isDayInPast(date);
+                return (
+                  <div key={day} className={`p-2 text-center ${isPastDay ? 'opacity-40' : ''}`}>
+                    <div className="text-[10px] font-bold text-white">{day.slice(0, 3)}</div>
+                    <div className="text-[8px] text-white/40">{date.getDate()}</div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            {viewMode === 'day' ? (
+              <>
+                {visibleDaySlots.map((time) => {
+                  const task = getTaskAtSlot(DAYS[selectedDay], time);
+                  const date = getDayDate(DAYS[selectedDay]);
+                  const isPast = date < getCurrentRealDate();
+                  const canAdd = !isPast && !isTaskDateTimeInPast(DAYS[selectedDay], time, date);
                   return (
-                    <div key={day} className={`p-2 text-center ${isPastDay ? 'opacity-40' : ''}`}>
-                      <div className="text-[10px] font-bold text-white">{day.slice(0, 3)}</div>
-                      <div className="text-[8px] text-white/40">{date.getDate()}</div>
+                    <div key={time} className={`grid grid-cols-1 border-b border-white/10 ${isPast ? 'opacity-50' : ''}`}>
+                      <div className="p-1.5 border-r border-white/10 flex items-center justify-between bg-white/5">
+                        <span className="text-[9px] font-mono text-white/60">{time}</span>
+                      </div>
+                      <div className="p-0.5 w-full bg-black">
+                        {task ? (
+                          <MobileTaskCell task={task} onUpdate={handleRefresh} />
+                        ) : canAdd ? (
+                          <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
+                            <Plus size={14} className="text-white/40" />
+                          </div>
+                        ) : (
+                          <div className="h-14 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center cursor-not-allowed">
+                            <Lock size={10} className="text-white/40" />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
-              </div>
-              
-              {viewMode === 'day' ? (
-                <>
-                  {visibleDaySlots.map((time) => {
-                    const task = getTaskAtSlot(DAYS[selectedDay], time);
-                    const date = getDayDate(DAYS[selectedDay]);
-                    const isPast = date < getCurrentRealDate();
-                    const canAdd = !isPast && !isTaskDateTimeInPast(DAYS[selectedDay], time, date);
-                    return (
-                      <div key={time} className={`grid grid-cols-1 border-b border-white/10 ${isPast ? 'opacity-50' : ''}`}>
-                        <div className="p-1.5 border-r border-white/10 flex items-center justify-between bg-white/5">
-                          <span className="text-[9px] font-mono text-white/60">{time}</span>
-                        </div>
-                        <div className="p-0.5 w-full bg-black">
+                {hasMoreSlots && (
+                  <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
+                    <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-white bg-white/10 rounded-lg">Load More</button>
+                    <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-white/60 bg-white/10 rounded-lg">Load All ({sortedDayTimes.length})</button>
+                  </div>
+                )}
+                {visibleSlotCount > WINDOW_SIZE && (
+                  <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-white bg-white/5 border-t border-white/10">Show Less</button>
+                )}
+              </>
+            ) : (
+              <>
+                {visibleWeekSlots.map((time) => (
+                  <div key={time} className="grid grid-cols-8 border-b border-white/10">
+                    <div className="p-1.5 border-r border-white/10 flex items-center justify-center bg-white/5">
+                      <span className="text-[9px] font-mono text-white/60">{time}</span>
+                    </div>
+                    {DAYS.map(day => {
+                      const task = getTaskAtSlot(day, time);
+                      const date = getDayDate(day);
+                      const isPast = date < getCurrentRealDate();
+                      const canAdd = !isPast && !isTaskDateTimeInPast(day, time, date);
+                      return (
+                        <div key={`${day}-${time}`} className={`p-0.5 w-full bg-black ${isPast ? 'opacity-50' : ''}`}>
                           {task ? (
                             <MobileTaskCell task={task} onUpdate={handleRefresh} />
                           ) : canAdd ? (
-                            <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
-                              <Plus size={14} className="text-white/40" />
+                            <div onClick={() => handleSlotClick(day, time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
+                              <Plus size={12} className="text-white/40" />
                             </div>
                           ) : (
                             <div className="h-14 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center cursor-not-allowed">
@@ -712,117 +750,77 @@ export default function WeekView() {
                             </div>
                           )}
                         </div>
-                      </div>
-                    );
-                  })}
-                  {hasMoreSlots && (
-                    <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
-                      <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-white bg-white/10 rounded-lg">Load More</button>
-                      <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-white/60 bg-white/10 rounded-lg">Load All ({sortedDayTimes.length})</button>
-                    </div>
-                  )}
-                  {visibleSlotCount > WINDOW_SIZE && (
-                    <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-white bg-white/5 border-t border-white/10">Show Less</button>
-                  )}
-                </>
-              ) : (
-                <>
-                  {visibleWeekSlots.map((time) => (
-                    <div key={time} className="grid grid-cols-8 border-b border-white/10">
-                      <div className="p-1.5 border-r border-white/10 flex items-center justify-center bg-white/5">
-                        <span className="text-[9px] font-mono text-white/60">{time}</span>
-                      </div>
-                      {DAYS.map(day => {
-                        const task = getTaskAtSlot(day, time);
-                        const date = getDayDate(day);
-                        const isPast = date < getCurrentRealDate();
-                        const canAdd = !isPast && !isTaskDateTimeInPast(day, time, date);
-                        return (
-                          <div key={`${day}-${time}`} className={`p-0.5 w-full bg-black ${isPast ? 'opacity-50' : ''}`}>
-                            {task ? (
-                              <MobileTaskCell task={task} onUpdate={handleRefresh} />
-                            ) : canAdd ? (
-                              <div onClick={() => handleSlotClick(day, time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
-                                <Plus size={12} className="text-white/40" />
-                              </div>
-                            ) : (
-                              <div className="h-14 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center cursor-not-allowed">
-                                <Lock size={10} className="text-white/40" />
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                  {hasMoreWeekSlots && (
-                    <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
-                      <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-white bg-white/10 rounded-lg">Load More</button>
-                      <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-white/60 bg-white/10 rounded-lg">Load All ({sortedWeekTimes.length})</button>
-                    </div>
-                  )}
-                  {visibleSlotCount > WINDOW_SIZE && (
-                    <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-white bg-white/5 border-t border-white/10">Show Less</button>
-                  )}
-                </>
-              )}
-            </div>
-            
-            {/* Empty State */}
-            {viewMode === 'day' && currentDayTimes.length === 0 && (
-              <div className="bg-white/5 border border-white/10 rounded-xl p-6 text-center">
-                <Calendar size={24} className="text-white/30 mx-auto mb-2" />
-                <p className="text-xs text-white/60">No tasks for {DAYS[selectedDay]}</p>
-                <button onClick={() => setShowAddModal(true)} className="mt-2 px-3 py-1.5 rounded-lg bg-white text-black text-xs">Add Task</button>
-              </div>
-            )}
-          </div>
-        </div>
-        
-        {/* Modals */}
-        <TaskModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSave={handleAddTask} theme={theme} day={DAYS[selectedDay]} weekStartDate={getWeekStart(selectedDate)} isMobile={true} />
-        <TaskModal isOpen={showSlotModal} onClose={() => { setShowSlotModal(false); setSelectedSlot(null); }} day={selectedSlot?.day} time={selectedSlot?.time} onSave={handleAddTaskToSlot} theme={theme} weekStartDate={getWeekStart(selectedDate)} isMobile={true} />
-        
-        {showThemeModal && (
-          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
-            <div className="bg-black rounded-xl p-4 w-80 border border-white/20">
-              <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Theme</h3><button onClick={() => setShowThemeModal(false)}><X size={14} className="text-white/60" /></button></div>
-              <div className="space-y-2">
-                <div><label className="text-[10px] text-white/60">Primary</label><input type="color" value={theme.primary} onChange={e => handleThemeUpdate({...theme, primary: e.target.value})} className="w-full h-8 rounded-lg mt-1 bg-white/10 border border-white/20" /></div>
-                <div><label className="text-[10px] text-white/60">Secondary</label><input type="color" value={theme.secondary} onChange={e => handleThemeUpdate({...theme, secondary: e.target.value})} className="w-full h-8 rounded-lg mt-1 bg-white/10 border border-white/20" /></div>
-              </div>
-            </div>
-          </div>
-        )}
-        
-        {showTimeSlotModal && (
-          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
-            <div className="bg-black rounded-xl p-4 w-80 border border-white/20">
-              <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Time Slots</h3><button onClick={() => setShowTimeSlotModal(false)}><X size={14} className="text-white/60" /></button></div>
-              <div className="flex gap-2 mb-3"><input type="time" value={newTimeSlot} onChange={e => setNewTimeSlot(e.target.value)} className="flex-1 p-1.5 text-xs rounded bg-white/10 border border-white/20 text-white" /><button onClick={handleAddTimeSlot} className="px-3 py-1.5 rounded text-xs bg-white text-black">Add</button></div>
-              <div className="space-y-1 max-h-48 overflow-y-auto">
-                {timeSlots.map(slot => (
-                  <div key={slot} className="flex justify-between items-center p-1.5 rounded bg-white/10">
-                    <span className="text-xs text-white">{slot}</span>
-                    <button onClick={() => handleRemoveTimeSlot(slot)} className="text-red-400 text-[9px]">Remove</button>
+                      );
+                    })}
                   </div>
                 ))}
+                {hasMoreWeekSlots && (
+                  <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
+                    <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-white bg-white/10 rounded-lg">Load More</button>
+                    <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-white/60 bg-white/10 rounded-lg">Load All ({sortedWeekTimes.length})</button>
+                  </div>
+                )}
+                {visibleSlotCount > WINDOW_SIZE && (
+                  <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-white bg-white/5 border-t border-white/10">Show Less</button>
+                )}
+              </>
+            )}
+          </div>
+          
+          {/* Empty State */}
+          {viewMode === 'day' && currentDayTimes.length === 0 && (
+            <div className="bg-white/5 border border-white/10 rounded-xl p-6 text-center">
+              <Calendar size={24} className="text-white/30 mx-auto mb-2" />
+              <p className="text-xs text-white/60">No tasks for {DAYS[selectedDay]}</p>
+              <button onClick={() => setShowAddModal(true)} className="mt-2 px-3 py-1.5 rounded-lg bg-white text-black text-xs">Add Task</button>
+            </div>
+          )}
+          
+          {/* Modals */}
+          <TaskModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSave={handleAddTask} theme={theme} day={DAYS[selectedDay]} weekStartDate={getWeekStart(selectedDate)} isMobile={true} />
+          <TaskModal isOpen={showSlotModal} onClose={() => { setShowSlotModal(false); setSelectedSlot(null); }} day={selectedSlot?.day} time={selectedSlot?.time} onSave={handleAddTaskToSlot} theme={theme} weekStartDate={getWeekStart(selectedDate)} isMobile={true} />
+          
+          {showThemeModal && (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+              <div className="bg-black rounded-xl p-4 w-80 border border-white/20">
+                <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Theme</h3><button onClick={() => setShowThemeModal(false)}><X size={14} className="text-white/60" /></button></div>
+                <div className="space-y-2">
+                  <div><label className="text-[10px] text-white/60">Primary</label><input type="color" value={theme.primary} onChange={e => handleThemeUpdate({...theme, primary: e.target.value})} className="w-full h-8 rounded-lg mt-1 bg-white/10 border border-white/20" /></div>
+                  <div><label className="text-[10px] text-white/60">Secondary</label><input type="color" value={theme.secondary} onChange={e => handleThemeUpdate({...theme, secondary: e.target.value})} className="w-full h-8 rounded-lg mt-1 bg-white/10 border border-white/20" /></div>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+          
+          {showTimeSlotModal && (
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+              <div className="bg-black rounded-xl p-4 w-80 border border-white/20">
+                <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Time Slots</h3><button onClick={() => setShowTimeSlotModal(false)}><X size={14} className="text-white/60" /></button></div>
+                <div className="flex gap-2 mb-3"><input type="time" value={newTimeSlot} onChange={e => setNewTimeSlot(e.target.value)} className="flex-1 p-1.5 text-xs rounded bg-white/10 border border-white/20 text-white" /><button onClick={handleAddTimeSlot} className="px-3 py-1.5 rounded text-xs bg-white text-black">Add</button></div>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {timeSlots.map(slot => (
+                    <div key={slot} className="flex justify-between items-center p-1.5 rounded bg-white/10">
+                      <span className="text-xs text-white">{slot}</span>
+                      <button onClick={() => handleRemoveTimeSlot(slot)} className="text-red-400 text-[9px]">Remove</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
   
   // ================================================================
-  // DESKTOP RENDER - FULL ORIGINAL STYLES WITH PROPER CELLS
+  // DESKTOP RENDER - FIX 3: Made cells clickable
   // ================================================================
   return (
     <div className="w-full max-w-full overflow-x-auto pb-20 relative">
       <div className="min-w-[320px] space-y-3 p-4">
         
-        {/* Desktop Top Bar */}
+        {/* Desktop Top Bar - KEPT EXACTLY THE SAME */}
         <div className="bg-slate-900/80 rounded-xl p-3 border border-white/10 sticky top-0 z-20 backdrop-blur-sm">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
@@ -922,7 +920,7 @@ export default function WeekView() {
           </div>
         )}
         
-        {/* Desktop Time Grid - FULL ORIGINAL */}
+        {/* Desktop Time Grid - USING CLICKABLE DesktopTaskCell */}
         <div className="bg-slate-900/60 border border-white/10 rounded-xl overflow-hidden w-full backdrop-blur-sm">
           <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-slate-900/40`}>
             <div className="p-2 text-center text-[10px] font-bold text-slate-500 uppercase border-r border-white/10">Time</div>
@@ -1002,11 +1000,11 @@ export default function WeekView() {
                       const isPast = date < getCurrentRealDate();
                       const canAdd = !isPast && !isTaskDateTimeInPast(day, time, date);
                       return (
-                        <div key={`${day}-${time}`} className={`p-1 ${isPast ? 'opacity-50' : ''}`} onClick={() => canAdd && !task && handleSlotClick(day, time, date)}>
+                        <div key={`${day}-${time}`} className={`p-1 ${isPast ? 'opacity-50' : ''}`}>
                           {task ? (
                             <DesktopTaskCell task={task} onUpdate={handleRefresh} theme={theme} />
                           ) : canAdd ? (
-                            <div className="h-14 rounded-lg border border-dashed border-white/20 bg-slate-800/50 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
+                            <div onClick={() => canAdd && !task && handleSlotClick(day, time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-slate-800/50 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
                               <Plus size={14} className="text-slate-500" />
                             </div>
                           ) : (

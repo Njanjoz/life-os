@@ -1,4 +1,4 @@
-// src/components/TaskCell/TaskCell.jsx
+// src/components/TaskCell/TaskCell.jsx - FULLY FIXED with Mobile B&W Support
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Play, Check, RotateCcw, Edit2, X, Clock, AlertTriangle, Battery, Calendar, Ban, Target, Zap, Flag, Tag, FileText } from 'lucide-react';
@@ -39,8 +39,23 @@ const getTaskActualDate = (dayName, referenceDate) => {
   return taskDate;
 };
 
-// Helper: Get priority color and styles
-const getPriorityStyles = (priority) => {
+// Helper: Get priority color and styles (with mobile support)
+const getPriorityStyles = (priority, isMobile = false) => {
+  if (isMobile) {
+    // Black & white mobile styles - no purple
+    switch(priority) {
+      case 'high':
+        return { color: '#ffffff', bg: 'rgba(255, 255, 255, 0.2)', border: '#ffffff', label: 'High', icon: '🔴' };
+      case 'medium':
+        return { color: '#ffffff', bg: 'rgba(255, 255, 255, 0.15)', border: '#ffffff', label: 'Medium', icon: '🟡' };
+      case 'low':
+        return { color: '#ffffff', bg: 'rgba(255, 255, 255, 0.1)', border: '#ffffff', label: 'Low', icon: '🟢' };
+      default:
+        return { color: '#ffffff', bg: 'rgba(255, 255, 255, 0.1)', border: '#ffffff', label: 'Normal', icon: '⚪' };
+    }
+  }
+  
+  // Desktop original styles
   switch(priority) {
     case 'high':
       return { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', border: '#ef4444', label: 'High', icon: '🔴' };
@@ -76,7 +91,28 @@ const getTimeElapsedProgress = (task, selectedDate, now) => {
   return Math.min(100, Math.max(0, (elapsed / total) * 100));
 };
 
-const getCellColorState = (task, isPast, now, selectedDate) => {
+const getCellColorState = (task, isPast, now, selectedDate, isMobile = false) => {
+  if (isMobile) {
+    // Black & white mobile styles - NO PURPLE
+    if (isPast && task.status !== 'missed') return 'border-white/10 bg-white/5 opacity-60';
+    if (task.status === 'completed') return 'border-green-500/50 bg-green-500/10';
+    if (task.status === 'rescheduled') return 'border-yellow-500/50 bg-yellow-500/10';
+    if (task.status === 'missed') return 'border-red-500/50 bg-red-500/10';
+    
+    const taskDate = getTaskActualDate(task.day, selectedDate);
+    const [endHour, endMin] = task.endTime.split(':').map(Number);
+    const end = new Date(taskDate);
+    end.setHours(endHour, endMin, 0, 0);
+    const isOverdue = now > end && task.status !== 'completed';
+    
+    if (isOverdue) return 'border-red-500 bg-red-500/10';
+    if (task.status === 'active') return 'border-white/30 bg-white/10';
+    if (task.status === 'pending') return 'border-white/20 bg-white/5';
+    
+    return 'border-white/10 bg-black';
+  }
+  
+  // Desktop original styles
   if (isPast && task.status !== 'missed') return 'border-slate-600 bg-slate-800/50 opacity-60';
   if (task.status === 'completed') return 'border-green-500 bg-green-500/20';
   if (task.status === 'rescheduled') return 'border-yellow-500 bg-yellow-500/20';
@@ -168,7 +204,7 @@ const calculatePerformanceMetrics = (task) => {
   };
 };
 
-export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, theme, isPast = false, viewMode = 'week' }) {
+export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, theme, isPast = false, viewMode = 'week', isMobile = false }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -190,7 +226,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const isClickProcessingRef = useRef(false);
   
   const performance = useMemo(() => calculatePerformanceMetrics(localTask), [localTask]);
-  const priorityStyles = useMemo(() => getPriorityStyles(localTask?.priority), [localTask?.priority]);
+  const priorityStyles = useMemo(() => getPriorityStyles(localTask?.priority, isMobile), [localTask?.priority, isMobile]);
   
   useEffect(() => { setLocalTask(task); }, [task]);
   
@@ -274,7 +310,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     }
   }, [isTaskOverdue, localTask]);
   
-  // Cleanup click timeout on unmount
   useEffect(() => {
     return () => {
       if (clickTimeoutRef.current) {
@@ -287,7 +322,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     e.preventDefault();
     e.stopPropagation();
     
-    // Prevent multiple rapid clicks
     if (isClickProcessingRef.current) return;
     
     if (clickTimeoutRef.current) {
@@ -501,9 +535,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const handleEditClick = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
-    // First close the popup
     setIsExpanded(false);
-    // Then open edit modal after a short delay
     setTimeout(() => {
       setShowEditModal(true);
     }, 100);
@@ -527,7 +559,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const isRescheduled = localTask.status === 'rescheduled';
   const isOverdue = isTaskOverdue();
   const showStartButton = isPending && !isCompleted && !isMissed && !isRescheduled && !isOngoing;
-  const cellColor = getCellColorState(localTask, isPast, currentNow, selectedDate);
+  const cellColor = getCellColorState(localTask, isPast, currentNow, selectedDate, isMobile);
   const isHorizontal = viewMode === 'day';
   const isClickable = !isPast || isMissed;
   
@@ -536,12 +568,73 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     : { height: `${timeProgress}%`, width: '100%', bottom: 0, left: 0 };
   
   const getFillColor = () => {
+    if (isMobile) {
+      // Mobile B&W - only red for overdue, white for others
+      if (isOverdue && isPending) return isHorizontal ? 'linear-gradient(90deg, #ef4444, #dc2626)' : 'linear-gradient(0deg, #ef4444, #dc2626)';
+      return isHorizontal ? 'linear-gradient(90deg, #ffffff, #ffffff)' : 'linear-gradient(0deg, #ffffff, #ffffff)';
+    }
+    // Desktop original
     if (isOngoing) return isHorizontal ? 'linear-gradient(90deg, #a855f7, #7c3aed)' : 'linear-gradient(0deg, #a855f7, #7c3aed)';
     if (isOverdue && isPending) return isHorizontal ? 'linear-gradient(90deg, #ef4444, #dc2626)' : 'linear-gradient(0deg, #ef4444, #dc2626)';
     return isHorizontal ? `linear-gradient(90deg, ${theme.primary}, ${theme.secondary})` : `linear-gradient(0deg, ${theme.primary}, ${theme.secondary})`;
   };
   
-  const AnalyticsPanel = () => (
+  // Mobile B&W Analytics Panel
+  const MobileAnalyticsPanel = () => (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-white/5 rounded-lg p-2 text-center">
+          <p className="text-[8px] text-white/40 uppercase">Scheduled</p>
+          <p className="text-xs font-mono text-white">{performance.scheduledStart} → {performance.scheduledEnd}</p>
+        </div>
+        <div className="bg-white/5 rounded-lg p-2 text-center">
+          <p className="text-[8px] text-white/40 uppercase">Actual</p>
+          <p className="text-xs font-mono text-white">
+            {performance.completionType === 'missed' ? '—' : `${performance.actualStart} → ${performance.completedAt}`}
+          </p>
+        </div>
+      </div>
+      
+      {performance.completionType === 'missed' ? (
+        <div className="bg-red-500/10 rounded-lg p-3 text-center">
+          <Ban size={16} className="text-red-400 mx-auto mb-1" />
+          <p className="text-xs font-bold text-red-400">Task Missed</p>
+        </div>
+      ) : (
+        <>
+          <div className="bg-white/5 rounded-lg p-2">
+            <div className="flex justify-between items-center">
+              <span className="text-[8px] text-white/40">Time Deviation</span>
+              <span className={`text-xs font-bold ${performance.timeDeviation < -5 ? 'text-green-400' : performance.timeDeviation > 5 ? 'text-red-400' : 'text-white'}`}>
+                {performance.timeDeviation !== 0 ? `${performance.timeDeviation > 0 ? '+' : ''}${Math.round(performance.timeDeviation)} min` : 'On time'}
+              </span>
+            </div>
+          </div>
+          
+          <div className="flex items-center justify-between bg-white/5 rounded-lg p-2">
+            <div>
+              <p className="text-[8px] text-white/40 uppercase">Completion</p>
+              <p className={`text-xs font-bold ${
+                performance.completionType === 'early' ? 'text-green-400' :
+                performance.completionType === 'on_time' ? 'text-white' : 'text-red-400'
+              }`}>
+                {performance.completionType.toUpperCase()}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[8px] text-white/40 uppercase">Points</p>
+              <p className={`text-xs font-bold ${performance.bonus > 0 ? 'text-green-400' : performance.bonus < 0 ? 'text-red-400' : 'text-white/60'}`}>
+                {performance.bonus > 0 ? `+${performance.bonus}` : performance.bonus}
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+  
+  // Desktop Analytics Panel (original)
+  const DesktopAnalyticsPanel = () => (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-slate-800/50 rounded-lg p-3 text-center">
@@ -609,10 +702,125 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     </div>
   );
   
-  const popupContent = isExpanded && isClickable && createPortal(
+  // Mobile B&W Popup
+  const MobilePopupContent = isExpanded && isClickable && createPortal(
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/90" onClick={() => setIsExpanded(false)}>
+      <div className="bg-black rounded-xl border border-white/20 shadow-2xl overflow-y-auto w-full max-w-sm max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
+        {/* Header - B&W */}
+        <div className="sticky top-0 bg-black p-4 border-b border-white/10">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h3 className="text-base font-semibold text-white">{localTask.title}</h3>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs text-white/60"><Clock size={10} className="inline mr-1" />{localTask.startTime} - {localTask.endTime}</span>
+                {isOverdue && !isCompleted && <span className="text-[9px] text-red-400 bg-red-500/20 px-2 py-0.5 rounded-full">OVERDUE</span>}
+                {isMissed && <span className="text-[9px] text-red-400 bg-red-500/20 px-2 py-0.5 rounded-full">MISSED</span>}
+              </div>
+            </div>
+            <button onClick={() => setIsExpanded(false)} className="text-white/60 hover:text-white p-1 rounded"><X size={18} /></button>
+          </div>
+        </div>
+        
+        {/* Task Details - B&W */}
+        <div className="p-4 border-b border-white/10">
+          <div className="flex items-center gap-2 mb-3">
+            <Tag size={10} className="text-white/60" />
+            <h4 className="text-[10px] font-semibold text-white/60 uppercase tracking-wide">Task Details</h4>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Flag size={10} className="text-white/40" />
+              <span className="text-[8px] text-white/40">Priority:</span>
+              <span className={`text-[9px] font-medium px-2 py-0.5 rounded-full flex items-center gap-1`} style={{ background: priorityStyles.bg, color: priorityStyles.color, border: `1px solid ${priorityStyles.border}` }}>
+                <span>{priorityStyles.icon}</span>
+                <span>{priorityStyles.label}</span>
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Tag size={10} className="text-white/40" />
+              <span className="text-[8px] text-white/40">Category:</span>
+              <span className="text-[9px] text-white bg-white/10 px-2 py-0.5 rounded-full">{localTask.category || 'General'}</span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Calendar size={10} className="text-white/40" />
+              <span className="text-[8px] text-white/40">Schedule:</span>
+              <span className="text-[9px] text-white bg-white/10 px-2 py-0.5 rounded-full">{localTask.day} at {localTask.startTime}</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* Time Battery - B&W */}
+        {!isMissed && (
+          <div className="p-4 border-b border-white/10">
+            <div className="bg-white/5 rounded-lg p-2">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-[8px] text-white/40 flex items-center gap-1"><Battery size={8} /> Time Elapsed</span>
+                <span className="text-xs font-mono text-white">{Math.round(timeProgress)}%</span>
+              </div>
+              <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-full transition-all duration-300 rounded-full" style={{ width: `${timeProgress}%`, background: getFillColor(), opacity: 0.7 }} />
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Analytics - B&W */}
+        <div className="p-4 border-b border-white/10">
+          <div className="flex items-center gap-2 mb-3">
+            <Target size={10} className="text-white/60" />
+            <h4 className="text-[10px] font-semibold text-white/60 uppercase tracking-wide">Performance</h4>
+          </div>
+          <MobileAnalyticsPanel />
+        </div>
+        
+        {/* Action Buttons - B&W */}
+        <div className="p-4 space-y-2">
+          {showStartButton && (
+            <button onClick={handleStart} disabled={isStarting || isProcessing} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-white text-black transition disabled:opacity-50">
+              {isStarting ? <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" /> : <Play size={12} />}
+              {isStarting ? 'Starting...' : 'Start Task'}
+            </button>
+          )}
+          
+          {isOngoing && (
+            <button onClick={handleCompleteClick} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-white text-black transition">
+              <Check size={12} /> Complete Task
+            </button>
+          )}
+          
+          {(!isCompleted && !isRescheduled) && (
+            <button onClick={() => setShowReschedule(true)} disabled={isProcessing} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-white/10 text-white transition disabled:opacity-50">
+              <RotateCcw size={12} /> Reschedule
+            </button>
+          )}
+          
+          {((isOverdue && !isCompleted && !isRescheduled) || isMissed) && (
+            <button onClick={() => setShowManualEntry(true)} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-white/10 text-white transition">
+              <Calendar size={12} /> Record Completion
+            </button>
+          )}
+          
+          {(isOngoing || isPending) && !isCompleted && !isRescheduled && !isMissed && (
+            <button onClick={handleCancelTask} disabled={isProcessing} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-red-600 text-white transition disabled:opacity-50">
+              <Ban size={12} /> Cancel / Miss
+            </button>
+          )}
+          
+          <button onClick={handleEditClick} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-white/10 text-white transition">
+            <Edit2 size={12} /> Edit Task
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+  
+  // Desktop Popup (original)
+  const DesktopPopupContent = isExpanded && isClickable && createPortal(
     <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.75)' }} onClick={() => setIsExpanded(false)}>
-      <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-y-auto" style={{ width: '100%', maxWidth: '480px', maxHeight: '85vh' }} onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
+      <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-y-auto w-full max-w-md max-h-[85vh]" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm p-4 border-b border-white/10 bg-gradient-to-r from-purple-500/10 to-blue-500/10">
           <div className="flex items-center justify-between">
             <div className="flex-1">
@@ -627,7 +835,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
           </div>
         </div>
         
-        {/* Task Details Section */}
         <div className="p-4 border-b border-white/10">
           <div className="flex items-center gap-2 mb-3">
             <Tag size={12} className="text-purple-400" />
@@ -642,40 +849,19 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
                 <span>{priorityStyles.label}</span>
               </span>
             </div>
-            
             <div className="flex items-center gap-2">
               <Tag size={12} className="text-slate-400" />
               <span className="text-[9px] text-slate-400">Category:</span>
               <span className="text-[10px] text-white bg-slate-800 px-2 py-0.5 rounded-full">{localTask.category || 'General'}</span>
             </div>
-            
-            {localTask.subcategory && localTask.subcategory !== 'General' && (
-              <div className="flex items-center gap-2">
-                <Tag size={12} className="text-slate-400" />
-                <span className="text-[9px] text-slate-400">Subcategory:</span>
-                <span className="text-[10px] text-white bg-slate-800 px-2 py-0.5 rounded-full">{localTask.subcategory}</span>
-              </div>
-            )}
-            
             <div className="flex items-center gap-2">
               <Calendar size={12} className="text-slate-400" />
               <span className="text-[9px] text-slate-400">Schedule:</span>
               <span className="text-[10px] text-white bg-slate-800 px-2 py-0.5 rounded-full">{localTask.day} at {localTask.startTime}</span>
             </div>
-            
-            {localTask.notes && (
-              <div className="mt-2 p-2 bg-slate-800/30 rounded-lg">
-                <div className="flex items-center gap-1 mb-1">
-                  <FileText size={10} className="text-slate-400" />
-                  <p className="text-[8px] text-slate-400 uppercase tracking-wider">Notes</p>
-                </div>
-                <p className="text-[10px] text-slate-300 leading-relaxed">{localTask.notes}</p>
-              </div>
-            )}
           </div>
         </div>
         
-        {/* System A: Time Battery Info */}
         {!isMissed && (
           <div className="p-4 border-b border-white/10">
             <div className="bg-slate-800/50 rounded-lg p-3">
@@ -686,21 +872,18 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
               <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
                 <div className="h-full transition-all duration-300 rounded-full" style={{ width: `${timeProgress}%`, background: getFillColor() }} />
               </div>
-              <p className="text-[8px] text-slate-500 mt-2 text-center">Battery fill = time elapsed in scheduled window (not work progress)</p>
             </div>
           </div>
         )}
         
-        {/* System B: Performance Analytics */}
         <div className="p-4">
           <div className="flex items-center gap-2 mb-3">
             <Target size={14} className="text-purple-400" />
             <h4 className="text-xs font-semibold text-white uppercase tracking-wide">Performance Analytics</h4>
           </div>
-          <AnalyticsPanel />
+          <DesktopAnalyticsPanel />
         </div>
         
-        {/* Action Buttons */}
         <div className="p-4 pt-0 space-y-2">
           {showStartButton && (
             <button onClick={handleStart} disabled={isStarting || isProcessing} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white transition disabled:opacity-50">
@@ -708,31 +891,26 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
               {isStarting ? 'Starting...' : 'Start Task'}
             </button>
           )}
-          
           {isOngoing && (
             <button onClick={handleCompleteClick} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white transition">
               <Check size={14} /> Complete Task
             </button>
           )}
-          
           {(!isCompleted && !isRescheduled) && (
             <button onClick={() => setShowReschedule(true)} disabled={isProcessing} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-yellow-600 hover:bg-yellow-700 text-white transition disabled:opacity-50">
-              <RotateCcw size={14} /> Reschedule {isMissed ? '(Missed Task)' : ''}
+              <RotateCcw size={14} /> Reschedule
             </button>
           )}
-          
           {((isOverdue && !isCompleted && !isRescheduled) || isMissed) && (
             <button onClick={() => setShowManualEntry(true)} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white transition">
-              <Calendar size={14} /> Record Completion (Log actual times)
+              <Calendar size={14} /> Record Completion
             </button>
           )}
-          
           {(isOngoing || isPending) && !isCompleted && !isRescheduled && !isMissed && (
             <button onClick={handleCancelTask} disabled={isProcessing} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white transition disabled:opacity-50">
               <Ban size={14} /> Cancel / Miss
             </button>
           )}
-          
           <button onClick={handleEditClick} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white transition">
             <Edit2 size={14} /> Edit Task
           </button>
@@ -742,9 +920,91 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     document.body
   );
   
-  const completionConfirmContent = showCompletionConfirm && createPortal(
+  // Mobile confirm dialogs (B&W)
+  const MobileCompletionConfirm = showCompletionConfirm && createPortal(
+    <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/90">
+      <div className="bg-black rounded-xl border border-white/20 shadow-2xl overflow-hidden w-full max-w-sm">
+        <div className="p-4 border-b border-white/10">
+          <h3 className="text-base font-bold text-white">Complete Task?</h3>
+        </div>
+        <div className="p-5">
+          <p className="text-sm text-white/80 mb-4">
+            Confirm completion of <span className="text-white font-bold">{localTask.title}</span>
+          </p>
+          <div className="flex gap-3">
+            <button onClick={confirmCompletion} className="flex-1 py-2 rounded-lg bg-white text-black text-sm font-semibold transition">
+              Confirm
+            </button>
+            <button onClick={() => setShowCompletionConfirm(false)} className="flex-1 py-2 rounded-lg bg-white/10 text-white text-sm font-semibold transition">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+  
+  const MobileRescheduleContent = showReschedule && createPortal(
+    <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/90" onClick={() => setShowReschedule(false)}>
+      <div className="bg-black rounded-xl border border-white/20 shadow-2xl overflow-hidden w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="p-4 border-b border-white/10">
+          <h3 className="text-base font-bold text-white">Reschedule Task</h3>
+          {isMissed && <p className="text-xs text-white/60 mt-1">This task was missed. Reschedule to a new time/day.</p>}
+        </div>
+        <div className="p-5 space-y-3">
+          <select value={newDay} onChange={(e) => setNewDay(e.target.value)} className="w-full p-2 text-sm rounded-lg bg-white/10 border border-white/20 text-white">
+            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(d => <option key={d}>{d}</option>)}
+          </select>
+          <input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} className="w-full p-2 text-sm rounded-lg bg-white/10 border border-white/20 text-white" />
+          <div className="flex gap-3 pt-2">
+            <button onClick={handleReschedule} disabled={isProcessing} className="flex-1 py-2 rounded-lg bg-white text-black text-sm font-semibold transition disabled:opacity-50">
+              {isProcessing ? 'Processing...' : 'Reschedule'}
+            </button>
+            <button onClick={() => setShowReschedule(false)} className="flex-1 py-2 rounded-lg bg-white/10 text-white text-sm font-semibold transition">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+  
+  const MobileManualEntryContent = showManualEntry && createPortal(
+    <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/90" onClick={() => setShowManualEntry(false)}>
+      <div className="bg-black rounded-xl border border-white/20 shadow-2xl overflow-hidden w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="p-4 border-b border-white/10">
+          <h3 className="text-base font-bold text-white">Record Missed Task</h3>
+          <p className="text-xs text-white/60 mt-1">Enter the actual times you completed this task</p>
+        </div>
+        <div className="p-5 space-y-3">
+          <div>
+            <label className="text-xs text-white/60 block mb-1">Actual Start Time</label>
+            <input type="time" value={manualStart} onChange={(e) => setManualStart(e.target.value)} className="w-full p-2 text-sm rounded-lg bg-white/10 border border-white/20 text-white" />
+          </div>
+          <div>
+            <label className="text-xs text-white/60 block mb-1">Actual End Time</label>
+            <input type="time" value={manualEnd} onChange={(e) => setManualEnd(e.target.value)} className="w-full p-2 text-sm rounded-lg bg-white/10 border border-white/20 text-white" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button onClick={handleManualComplete} disabled={isProcessing} className="flex-1 py-2 rounded-lg bg-white text-black text-sm font-semibold transition disabled:opacity-50">
+              {isProcessing ? 'Saving...' : 'Save'}
+            </button>
+            <button onClick={() => setShowManualEntry(false)} className="flex-1 py-2 rounded-lg bg-white/10 text-white text-sm font-semibold transition">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+  
+  // Desktop confirm dialogs (original)
+  const DesktopCompletionConfirm = showCompletionConfirm && createPortal(
     <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.8)' }}>
-      <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden max-w-sm w-full">
+      <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden w-full max-w-sm">
         <div className="p-4 border-b bg-purple-500/20 border-purple-500/30">
           <h3 className="text-lg font-bold text-white">Complete Task?</h3>
         </div>
@@ -766,9 +1026,9 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     document.body
   );
   
-  const rescheduleContent = showReschedule && createPortal(
+  const DesktopRescheduleContent = showReschedule && createPortal(
     <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.8)' }} onClick={() => setShowReschedule(false)}>
-      <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
         <div className="p-4 border-b bg-yellow-500/20 border-yellow-500/30">
           <h3 className="text-lg font-bold text-white">Reschedule Task</h3>
           {isMissed && <p className="text-xs text-yellow-300 mt-1">This task was missed. Reschedule to a new time/day.</p>}
@@ -779,8 +1039,8 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
           </select>
           <input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} className="w-full p-2 text-sm rounded-lg bg-slate-800 border border-white/10 text-white" />
           <div className="flex gap-3 pt-2">
-            <button onClick={handleReschedule} disabled={isProcessing} className="flex-1 py-2 rounded-lg bg-yellow-600 text-white text-sm font-semibold hover:bg-yellow-700 transition disabled:opacity-50 flex items-center justify-center gap-2">
-              {isProcessing ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Processing...</> : 'Reschedule'}
+            <button onClick={handleReschedule} disabled={isProcessing} className="flex-1 py-2 rounded-lg bg-yellow-600 text-white text-sm font-semibold hover:bg-yellow-700 transition disabled:opacity-50">
+              {isProcessing ? 'Processing...' : 'Reschedule'}
             </button>
             <button onClick={() => setShowReschedule(false)} className="flex-1 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold hover:bg-slate-600 transition">
               Cancel
@@ -792,9 +1052,9 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     document.body
   );
   
-  const manualEntryContent = showManualEntry && createPortal(
+  const DesktopManualEntryContent = showManualEntry && createPortal(
     <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.8)' }} onClick={() => setShowManualEntry(false)}>
-      <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-slate-900 rounded-xl border border-white/20 shadow-2xl overflow-hidden w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
         <div className="p-4 border-b bg-orange-500/20 border-orange-500/30">
           <h3 className="text-lg font-bold text-white">Record Missed Task Completion</h3>
           <p className="text-xs text-orange-300 mt-1">Enter the actual times you completed this task</p>
@@ -831,25 +1091,25 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
           disabled={!isClickable || isProcessing}
         >
           {timeProgress > 0 && !isPast && !isMissed && !isCompleted && (
-            <div className="absolute transition-all duration-300 ease-out" style={{ ...fillStyle, background: getFillColor(), opacity: 0.7 }} />
+            <div className="absolute transition-all duration-300 ease-out" style={{ ...fillStyle, background: getFillColor(), opacity: isMobile ? 0.3 : 0.7 }} />
           )}
           
           <div className="relative z-10 p-1.5 h-full flex flex-col justify-between">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-medium truncate text-white max-w-[60px]">
+              <p className={`text-[10px] font-medium truncate max-w-[60px] ${isMobile ? 'text-white' : 'text-white'}`}>
                 {localTask.rescheduledFrom ? '↻ ' : ''}{localTask.title?.slice(0, 8)}
               </p>
               <div className="flex items-center gap-0.5">
                 {isCompleted && <Check size={10} className="text-green-500" />}
-                {isOngoing && <Zap size={10} className="text-purple-500 animate-pulse" />}
+                {isOngoing && <Zap size={10} className={isMobile ? 'text-white animate-pulse' : 'text-purple-500 animate-pulse'} />}
                 {isOverdue && <AlertTriangle size={10} className="text-red-500 animate-pulse" />}
                 {isMissed && <Ban size={10} className="text-red-500" />}
               </div>
             </div>
             <div className="flex items-center justify-between mt-0.5">
               <div className="flex items-center gap-0.5">
-                <Clock size={7} className="text-slate-400" />
-                <span className="text-[8px] font-mono text-slate-300">{localTask.startTime}</span>
+                <Clock size={7} className={isMobile ? 'text-white/40' : 'text-slate-400'} />
+                <span className={`text-[8px] font-mono ${isMobile ? 'text-white/60' : 'text-slate-300'}`}>{localTask.startTime}</span>
               </div>
               {performance.delayMinutes > 0 && isOngoing && (
                 <span className="text-[6px] text-orange-400 font-bold">{performance.delayMinutes}m late</span>
@@ -871,10 +1131,10 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
         </button>
       </div>
       
-      {popupContent}
-      {completionConfirmContent}
-      {rescheduleContent}
-      {manualEntryContent}
+      {isMobile ? MobilePopupContent : DesktopPopupContent}
+      {isMobile ? MobileCompletionConfirm : DesktopCompletionConfirm}
+      {isMobile ? MobileRescheduleContent : DesktopRescheduleContent}
+      {isMobile ? MobileManualEntryContent : DesktopManualEntryContent}
       
       {showEditModal && createPortal(
         <TaskModal 
@@ -883,7 +1143,8 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
           task={localTask} 
           weekId={weekId} 
           onUpdate={handleEditModalUpdate} 
-          theme={theme} 
+          theme={theme}
+          isMobile={isMobile}
         />,
         document.body
       )}

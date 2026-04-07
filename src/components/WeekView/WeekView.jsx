@@ -1,4 +1,4 @@
-// src/components/WeekView/WeekView.jsx - FULLY FIXED (Mobile B&W Lite + Desktop Original)
+// src/components/WeekView/WeekView.jsx - COMPLETE FULLY FIXED VERSION
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Calendar, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2, Check, Zap, Ban } from 'lucide-react';
 import { TaskModal } from '../TaskModal/TaskModal';
@@ -76,21 +76,15 @@ const runNotificationEngine = (tasks, notifiedSet) => {
   }
 };
 
-const TimeGrid = React.memo(({ children }) => <>{children}</>);
-
-// Simple Task Cell for Mobile (no complex popups)
+// Mobile Task Cell with FIXED POPUP (higher z-index)
 const MobileTaskCell = ({ task, onUpdate }) => {
   const [showConfirm, setShowConfirm] = useState(false);
   
-  const handleStatusToggle = async () => {
+  const handleStatusToggle = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (task.status === 'completed') return;
-    
-    if (task.status === 'pending') {
-      setShowConfirm(true);
-    } else if (task.status === 'active') {
-      await updateTask(task.id, { status: 'completed', completedAt: new Date() });
-      onUpdate();
-    }
+    setShowConfirm(true);
   };
   
   const handleComplete = async () => {
@@ -132,13 +126,82 @@ const MobileTaskCell = ({ task, onUpdate }) => {
         </div>
       </button>
       
+      {/* FIXED: Higher z-index and proper positioning */}
       {showConfirm && (
-        <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/90" onClick={() => setShowConfirm(false)}>
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/90" onClick={() => setShowConfirm(false)}>
           <div className="bg-black rounded-xl border border-white/20 p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <p className="text-sm text-white mb-4">Complete "{task.title}"?</p>
             <div className="flex gap-3">
               <button onClick={handleComplete} className="flex-1 py-2 rounded-lg bg-white text-black text-sm font-semibold">Complete</button>
               <button onClick={() => setShowConfirm(false)} className="flex-1 py-2 rounded-lg bg-white/10 text-white text-sm font-semibold">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+// Desktop Task Cell
+const DesktopTaskCell = ({ task, onUpdate, theme }) => {
+  const [showConfirm, setShowConfirm] = useState(false);
+  
+  const getStatusColor = () => {
+    if (task.status === 'completed') return 'border-green-500/50 bg-green-500/20';
+    if (task.status === 'missed') return 'border-red-500/50 bg-red-500/20';
+    if (task.status === 'active') return 'border-purple-500/50 bg-purple-500/20';
+    return 'border-blue-500/50 bg-blue-500/10';
+  };
+  
+  const getStatusIcon = () => {
+    if (task.status === 'completed') return <Check size={10} className="text-green-500" />;
+    if (task.status === 'active') return <Zap size={10} className="text-purple-500 animate-pulse" />;
+    if (task.status === 'missed') return <Ban size={10} className="text-red-500" />;
+    return null;
+  };
+  
+  const handleClick = async () => {
+    if (task.status === 'completed') return;
+    if (task.status === 'pending' || task.status === 'active') {
+      setShowConfirm(true);
+    }
+  };
+  
+  const handleComplete = async () => {
+    await updateTask(task.id, { status: 'completed', completedAt: new Date() });
+    onUpdate();
+    setShowConfirm(false);
+  };
+  
+  return (
+    <>
+      <button
+        onClick={handleClick}
+        className={`w-full h-14 rounded-lg border relative overflow-hidden text-left transition-all hover:brightness-110 ${getStatusColor()}`}
+      >
+        <div className="relative z-10 p-1.5 h-full flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-medium truncate text-white max-w-[60px]">
+              {task.title?.slice(0, 8)}
+            </p>
+            {getStatusIcon()}
+          </div>
+          <div className="flex items-center justify-between mt-0.5">
+            <div className="flex items-center gap-0.5">
+              <Clock size={7} className="text-slate-400" />
+              <span className="text-[8px] font-mono text-slate-300">{task.startTime}</span>
+            </div>
+          </div>
+        </div>
+      </button>
+      
+      {showConfirm && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/80" onClick={() => setShowConfirm(false)}>
+          <div className="bg-slate-900 rounded-xl border border-white/20 p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm text-white mb-4">Complete "{task.title}"?</p>
+            <div className="flex gap-3">
+              <button onClick={handleComplete} className="flex-1 py-2 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700">Complete</button>
+              <button onClick={() => setShowConfirm(false)} className="flex-1 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold hover:bg-slate-600">Cancel</button>
             </div>
           </div>
         </div>
@@ -184,6 +247,7 @@ export default function WeekView() {
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [seconds, setSeconds] = useState(() => new Date().getSeconds());
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   
   const isLoadingRef = useRef(false);
   const notifiedTasksRef = useRef(new Set());
@@ -281,7 +345,7 @@ export default function WeekView() {
       lastSelectedDateKeyRef.current = currentDateKey;
       loadWeek();
     }
-  }, [user, selectedDate, loadWeek]);
+  }, [user, selectedDate, refreshTrigger, loadWeek]);
   
   useEffect(() => {
     setVisibleSlotCount(WINDOW_SIZE);
@@ -299,13 +363,10 @@ export default function WeekView() {
     return () => { if (notificationIntervalRef.current) clearInterval(notificationIntervalRef.current); };
   }, [user]);
   
-  const handleRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(() => {
     notifiedTasksRef.current.clear();
-    setVisibleSlotCount(WINDOW_SIZE);
-    setExpandedSections({ dayView: false, weekView: false });
-    lastSelectedDateKeyRef.current = null;
-    await loadWeek();
-  }, [WINDOW_SIZE, loadWeek]);
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
   
   const changeWeek = useCallback((direction) => {
     const newDate = normalizeDate(new Date(selectedDate));
@@ -420,7 +481,7 @@ export default function WeekView() {
       startTime: selectedSlot.time,
       endTime: taskData.endTime || `${parseInt(selectedSlot.time.split(':')[0]) + 1}:00`
     });
-    await handleRefresh();
+    handleRefresh();
     setShowSlotModal(false);
     setSelectedSlot(null);
   };
@@ -435,7 +496,7 @@ export default function WeekView() {
       startTime: taskData.startTime,
       endTime: taskData.endTime
     });
-    await handleRefresh();
+    handleRefresh();
     setShowAddModal(false);
   };
   
@@ -447,7 +508,7 @@ export default function WeekView() {
       await updateTimeSlots(updatedSlots);
       setTimeSlots(updatedSlots);
       setNewTimeSlot('12:00');
-      await handleRefresh();
+      handleRefresh();
     }
   };
   
@@ -455,22 +516,22 @@ export default function WeekView() {
     const updatedSlots = timeSlots.filter(s => s !== slot);
     await updateTimeSlots(updatedSlots);
     setTimeSlots(updatedSlots);
-    await handleRefresh();
+    handleRefresh();
   };
   
   const handleResetWeek = async () => {
-    if (confirm('⚠️ Delete ALL tasks for this week? This cannot be undone.')) {
+    if (window.confirm('⚠️ Delete ALL tasks for this week? This cannot be undone.')) {
       setResetting(true);
       try {
         if (week) await deleteAllTasksForWeek(week.id);
-        await handleRefresh();
+        handleRefresh();
       } catch (error) { console.error(error); alert('Failed to reset week.'); }
       finally { setResetting(false); setShowFilterMenu(false); }
     }
   };
   
   const handleResetAll = async () => {
-    if (confirm('⚠️ COMPLETE DATA RESET - This will delete EVERYTHING. Cannot be undone.')) {
+    if (window.confirm('⚠️ COMPLETE DATA RESET - This will delete EVERYTHING. Cannot be undone.')) {
       setResetting(true);
       try { await resetAllUserData(); window.location.reload(); } 
       catch (error) { console.error(error); alert('Failed to reset data.'); setResetting(false); }
@@ -487,15 +548,15 @@ export default function WeekView() {
   }
   
   // ================================================================
-  // MOBILE B&W LITE RENDER
+  // MOBILE B&W LITE RENDER - WITH VERTICAL SCROLLING
   // ================================================================
   if (isMobileDevice) {
     return (
-      <div className="w-full max-w-full overflow-x-auto pb-20 relative bg-black min-h-screen">
-        <div className="min-w-[320px] space-y-3 p-3">
-          
+      <div className="h-screen flex flex-col bg-black overflow-hidden">
+        {/* Fixed Header - Doesn't scroll */}
+        <div className="flex-shrink-0 p-3 space-y-3 border-b border-white/10">
           {/* Top Bar */}
-          <div className="bg-black rounded-xl p-3 border border-white/10 sticky top-0 z-20">
+          <div className="bg-black rounded-xl p-3 border border-white/10">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <Clock size={14} className="text-white" />
@@ -605,80 +666,45 @@ export default function WeekView() {
               })}
             </div>
           )}
-          
-          {/* Time Grid */}
-          <div className="bg-black border border-white/20 rounded-xl overflow-hidden w-full">
-            <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-white/5`}>
-              <div className="p-2 text-center text-[9px] font-bold text-white/60 uppercase border-r border-white/10">Time</div>
-              {viewMode === 'week' && DAYS.map(day => {
-                const date = getDayDate(day);
-                const isPastDay = isDayInPast(date);
-                return (
-                  <div key={day} className={`p-2 text-center ${isPastDay ? 'opacity-40' : ''}`}>
-                    <div className="text-[10px] font-bold text-white">{day.slice(0, 3)}</div>
-                    <div className="text-[8px] text-white/40">{date.getDate()}</div>
-                  </div>
-                );
-              })}
-            </div>
-            
-            {viewMode === 'day' ? (
-              <>
-                {visibleDaySlots.map((time) => {
-                  const task = getTaskAtSlot(DAYS[selectedDay], time);
-                  const date = getDayDate(DAYS[selectedDay]);
-                  const isPast = date < getCurrentRealDate();
-                  const canAdd = !isPast && !isTaskDateTimeInPast(DAYS[selectedDay], time, date);
+        </div>
+        
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto px-3 pb-20">
+          <div className="space-y-3">
+            {/* Time Grid */}
+            <div className="bg-black border border-white/20 rounded-xl overflow-hidden w-full">
+              <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-white/5 sticky top-0 z-10`}>
+                <div className="p-2 text-center text-[9px] font-bold text-white/60 uppercase border-r border-white/10">Time</div>
+                {viewMode === 'week' && DAYS.map(day => {
+                  const date = getDayDate(day);
+                  const isPastDay = isDayInPast(date);
                   return (
-                    <div key={time} className={`grid grid-cols-1 border-b border-white/10 ${isPast ? 'opacity-50' : ''}`}>
-                      <div className="p-1.5 border-r border-white/10 flex items-center justify-between bg-white/5">
-                        <span className="text-[9px] font-mono text-white/60">{time}</span>
-                      </div>
-                      <div className="p-0.5 w-full bg-black">
-                        {task ? (
-                          <MobileTaskCell task={task} onUpdate={handleRefresh} />
-                        ) : canAdd ? (
-                          <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
-                            <Plus size={14} className="text-white/40" />
-                          </div>
-                        ) : (
-                          <div className="h-14 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center cursor-not-allowed">
-                            <Lock size={10} className="text-white/40" />
-                          </div>
-                        )}
-                      </div>
+                    <div key={day} className={`p-2 text-center ${isPastDay ? 'opacity-40' : ''}`}>
+                      <div className="text-[10px] font-bold text-white">{day.slice(0, 3)}</div>
+                      <div className="text-[8px] text-white/40">{date.getDate()}</div>
                     </div>
                   );
                 })}
-                {hasMoreSlots && (
-                  <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
-                    <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-white bg-white/10 rounded-lg">Load More</button>
-                    <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-white/60 bg-white/10 rounded-lg">Load All ({sortedDayTimes.length})</button>
-                  </div>
-                )}
-                {visibleSlotCount > WINDOW_SIZE && (
-                  <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-white bg-white/5 border-t border-white/10">Show Less</button>
-                )}
-              </>
-            ) : (
-              <>
-                {visibleWeekSlots.map((time) => (
-                  <div key={time} className="grid grid-cols-8 border-b border-white/10">
-                    <div className="p-1.5 border-r border-white/10 flex items-center justify-center bg-white/5">
-                      <span className="text-[9px] font-mono text-white/60">{time}</span>
-                    </div>
-                    {DAYS.map(day => {
-                      const task = getTaskAtSlot(day, time);
-                      const date = getDayDate(day);
-                      const isPast = date < getCurrentRealDate();
-                      const canAdd = !isPast && !isTaskDateTimeInPast(day, time, date);
-                      return (
-                        <div key={`${day}-${time}`} className={`p-0.5 w-full bg-black ${isPast ? 'opacity-50' : ''}`}>
+              </div>
+              
+              {viewMode === 'day' ? (
+                <>
+                  {visibleDaySlots.map((time) => {
+                    const task = getTaskAtSlot(DAYS[selectedDay], time);
+                    const date = getDayDate(DAYS[selectedDay]);
+                    const isPast = date < getCurrentRealDate();
+                    const canAdd = !isPast && !isTaskDateTimeInPast(DAYS[selectedDay], time, date);
+                    return (
+                      <div key={time} className={`grid grid-cols-1 border-b border-white/10 ${isPast ? 'opacity-50' : ''}`}>
+                        <div className="p-1.5 border-r border-white/10 flex items-center justify-between bg-white/5">
+                          <span className="text-[9px] font-mono text-white/60">{time}</span>
+                        </div>
+                        <div className="p-0.5 w-full bg-black">
                           {task ? (
                             <MobileTaskCell task={task} onUpdate={handleRefresh} />
                           ) : canAdd ? (
-                            <div onClick={() => handleSlotClick(day, time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
-                              <Plus size={12} className="text-white/40" />
+                            <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
+                              <Plus size={14} className="text-white/40" />
                             </div>
                           ) : (
                             <div className="h-14 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center cursor-not-allowed">
@@ -686,78 +712,118 @@ export default function WeekView() {
                             </div>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                ))}
-                {hasMoreWeekSlots && (
-                  <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
-                    <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-white bg-white/10 rounded-lg">Load More</button>
-                    <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-white/60 bg-white/10 rounded-lg">Load All ({sortedWeekTimes.length})</button>
-                  </div>
-                )}
-                {visibleSlotCount > WINDOW_SIZE && (
-                  <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-white bg-white/5 border-t border-white/10">Show Less</button>
-                )}
-              </>
-            )}
-          </div>
-          
-          {/* Empty State */}
-          {viewMode === 'day' && currentDayTimes.length === 0 && (
-            <div className="bg-white/5 border border-white/10 rounded-xl p-6 text-center">
-              <Calendar size={24} className="text-white/30 mx-auto mb-2" />
-              <p className="text-xs text-white/60">No tasks for {DAYS[selectedDay]}</p>
-              <button onClick={() => setShowAddModal(true)} className="mt-2 px-3 py-1.5 rounded-lg bg-white text-black text-xs">Add Task</button>
-            </div>
-          )}
-          
-          {/* Modals */}
-          <TaskModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSave={handleAddTask} theme={theme} day={DAYS[selectedDay]} weekStartDate={getWeekStart(selectedDate)} isMobile={true} />
-          <TaskModal isOpen={showSlotModal} onClose={() => { setShowSlotModal(false); setSelectedSlot(null); }} day={selectedSlot?.day} time={selectedSlot?.time} onSave={handleAddTaskToSlot} theme={theme} weekStartDate={getWeekStart(selectedDate)} isMobile={true} />
-          
-          {showThemeModal && (
-            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
-              <div className="bg-black rounded-xl p-4 w-80 border border-white/20">
-                <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Theme</h3><button onClick={() => setShowThemeModal(false)}><X size={14} className="text-white/60" /></button></div>
-                <div className="space-y-2">
-                  <div><label className="text-[10px] text-white/60">Primary</label><input type="color" value={theme.primary} onChange={e => handleThemeUpdate({...theme, primary: e.target.value})} className="w-full h-8 rounded-lg mt-1 bg-white/10 border border-white/20" /></div>
-                  <div><label className="text-[10px] text-white/60">Secondary</label><input type="color" value={theme.secondary} onChange={e => handleThemeUpdate({...theme, secondary: e.target.value})} className="w-full h-8 rounded-lg mt-1 bg-white/10 border border-white/20" /></div>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {showTimeSlotModal && (
-            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
-              <div className="bg-black rounded-xl p-4 w-80 border border-white/20">
-                <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Time Slots</h3><button onClick={() => setShowTimeSlotModal(false)}><X size={14} className="text-white/60" /></button></div>
-                <div className="flex gap-2 mb-3"><input type="time" value={newTimeSlot} onChange={e => setNewTimeSlot(e.target.value)} className="flex-1 p-1.5 text-xs rounded bg-white/10 border border-white/20 text-white" /><button onClick={handleAddTimeSlot} className="px-3 py-1.5 rounded text-xs bg-white text-black">Add</button></div>
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {timeSlots.map(slot => (
-                    <div key={slot} className="flex justify-between items-center p-1.5 rounded bg-white/10">
-                      <span className="text-xs text-white">{slot}</span>
-                      <button onClick={() => handleRemoveTimeSlot(slot)} className="text-red-400 text-[9px]">Remove</button>
+                      </div>
+                    );
+                  })}
+                  {hasMoreSlots && (
+                    <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
+                      <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-white bg-white/10 rounded-lg">Load More</button>
+                      <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-white/60 bg-white/10 rounded-lg">Load All ({sortedDayTimes.length})</button>
+                    </div>
+                  )}
+                  {visibleSlotCount > WINDOW_SIZE && (
+                    <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-white bg-white/5 border-t border-white/10">Show Less</button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {visibleWeekSlots.map((time) => (
+                    <div key={time} className="grid grid-cols-8 border-b border-white/10">
+                      <div className="p-1.5 border-r border-white/10 flex items-center justify-center bg-white/5">
+                        <span className="text-[9px] font-mono text-white/60">{time}</span>
+                      </div>
+                      {DAYS.map(day => {
+                        const task = getTaskAtSlot(day, time);
+                        const date = getDayDate(day);
+                        const isPast = date < getCurrentRealDate();
+                        const canAdd = !isPast && !isTaskDateTimeInPast(day, time, date);
+                        return (
+                          <div key={`${day}-${time}`} className={`p-0.5 w-full bg-black ${isPast ? 'opacity-50' : ''}`}>
+                            {task ? (
+                              <MobileTaskCell task={task} onUpdate={handleRefresh} />
+                            ) : canAdd ? (
+                              <div onClick={() => handleSlotClick(day, time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
+                                <Plus size={12} className="text-white/40" />
+                              </div>
+                            ) : (
+                              <div className="h-14 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center cursor-not-allowed">
+                                <Lock size={10} className="text-white/40" />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   ))}
-                </div>
+                  {hasMoreWeekSlots && (
+                    <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
+                      <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-white bg-white/10 rounded-lg">Load More</button>
+                      <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-white/60 bg-white/10 rounded-lg">Load All ({sortedWeekTimes.length})</button>
+                    </div>
+                  )}
+                  {visibleSlotCount > WINDOW_SIZE && (
+                    <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-white bg-white/5 border-t border-white/10">Show Less</button>
+                  )}
+                </>
+              )}
+            </div>
+            
+            {/* Empty State */}
+            {viewMode === 'day' && currentDayTimes.length === 0 && (
+              <div className="bg-white/5 border border-white/10 rounded-xl p-6 text-center">
+                <Calendar size={24} className="text-white/30 mx-auto mb-2" />
+                <p className="text-xs text-white/60">No tasks for {DAYS[selectedDay]}</p>
+                <button onClick={() => setShowAddModal(true)} className="mt-2 px-3 py-1.5 rounded-lg bg-white text-black text-xs">Add Task</button>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Modals */}
+        <TaskModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSave={handleAddTask} theme={theme} day={DAYS[selectedDay]} weekStartDate={getWeekStart(selectedDate)} isMobile={true} />
+        <TaskModal isOpen={showSlotModal} onClose={() => { setShowSlotModal(false); setSelectedSlot(null); }} day={selectedSlot?.day} time={selectedSlot?.time} onSave={handleAddTaskToSlot} theme={theme} weekStartDate={getWeekStart(selectedDate)} isMobile={true} />
+        
+        {showThemeModal && (
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+            <div className="bg-black rounded-xl p-4 w-80 border border-white/20">
+              <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Theme</h3><button onClick={() => setShowThemeModal(false)}><X size={14} className="text-white/60" /></button></div>
+              <div className="space-y-2">
+                <div><label className="text-[10px] text-white/60">Primary</label><input type="color" value={theme.primary} onChange={e => handleThemeUpdate({...theme, primary: e.target.value})} className="w-full h-8 rounded-lg mt-1 bg-white/10 border border-white/20" /></div>
+                <div><label className="text-[10px] text-white/60">Secondary</label><input type="color" value={theme.secondary} onChange={e => handleThemeUpdate({...theme, secondary: e.target.value})} className="w-full h-8 rounded-lg mt-1 bg-white/10 border border-white/20" /></div>
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+        
+        {showTimeSlotModal && (
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+            <div className="bg-black rounded-xl p-4 w-80 border border-white/20">
+              <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Time Slots</h3><button onClick={() => setShowTimeSlotModal(false)}><X size={14} className="text-white/60" /></button></div>
+              <div className="flex gap-2 mb-3"><input type="time" value={newTimeSlot} onChange={e => setNewTimeSlot(e.target.value)} className="flex-1 p-1.5 text-xs rounded bg-white/10 border border-white/20 text-white" /><button onClick={handleAddTimeSlot} className="px-3 py-1.5 rounded text-xs bg-white text-black">Add</button></div>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {timeSlots.map(slot => (
+                  <div key={slot} className="flex justify-between items-center p-1.5 rounded bg-white/10">
+                    <span className="text-xs text-white">{slot}</span>
+                    <button onClick={() => handleRemoveTimeSlot(slot)} className="text-red-400 text-[9px]">Remove</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
   
   // ================================================================
-  // DESKTOP RENDER - ORIGINAL STYLES
+  // DESKTOP RENDER - FULL ORIGINAL STYLES WITH PROPER CELLS
   // ================================================================
   return (
     <div className="w-full max-w-full overflow-x-auto pb-20 relative">
-      <div className="min-w-[320px] space-y-3">
+      <div className="min-w-[320px] space-y-3 p-4">
         
         {/* Desktop Top Bar */}
-        <div className="bg-slate-900/80 rounded-xl p-3 border border-white/10 sticky top-0 z-20">
+        <div className="bg-slate-900/80 rounded-xl p-3 border border-white/10 sticky top-0 z-20 backdrop-blur-sm">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <Clock size={14} className="text-purple-400" />
@@ -767,8 +833,8 @@ export default function WeekView() {
               </div>
             </div>
             <div className="flex gap-1">
-              <button onClick={() => changeWeek(-1)} className="p-1.5 hover:bg-white/10 rounded-lg"><ChevronLeft size={14} /></button>
-              <button onClick={() => changeWeek(1)} className="p-1.5 hover:bg-white/10 rounded-lg"><ChevronRight size={14} /></button>
+              <button onClick={() => changeWeek(-1)} className="p-1.5 hover:bg-white/10 rounded-lg text-white"><ChevronLeft size={14} /></button>
+              <button onClick={() => changeWeek(1)} className="p-1.5 hover:bg-white/10 rounded-lg text-white"><ChevronRight size={14} /></button>
             </div>
             <div className="flex gap-1">
               <button onClick={() => setViewMode('day')} className={`p-1.5 rounded-lg transition ${viewMode === 'day' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
@@ -813,19 +879,19 @@ export default function WeekView() {
         
         {/* Desktop Stats */}
         <div className="grid grid-cols-4 gap-1.5">
-          <div className="bg-slate-900/50 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Score</p><p className="text-sm font-bold text-white">{metrics.weeklyScore || 0}</p></div>
-          <div className="bg-slate-900/50 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Complete</p><p className="text-sm font-bold text-white">{metrics.completionRate || 0}%</p></div>
-          <div className="bg-slate-900/50 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Discipline</p><p className="text-sm font-bold text-white">{metrics.disciplineScore || 0}</p></div>
-          <div className="bg-slate-900/50 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Delay</p><p className="text-sm font-bold text-orange-400">{metrics.avgDelay || 0}m</p></div>
+          <div className="bg-slate-900/50 rounded-lg p-2 text-center backdrop-blur-sm"><p className="text-[8px] text-slate-400 uppercase">Score</p><p className="text-lg font-bold text-white">{metrics.weeklyScore || 0}</p></div>
+          <div className="bg-slate-900/50 rounded-lg p-2 text-center backdrop-blur-sm"><p className="text-[8px] text-slate-400 uppercase">Complete</p><p className="text-lg font-bold text-white">{metrics.completionRate || 0}%</p></div>
+          <div className="bg-slate-900/50 rounded-lg p-2 text-center backdrop-blur-sm"><p className="text-[8px] text-slate-400 uppercase">Discipline</p><p className="text-lg font-bold text-white">{metrics.disciplineScore || 0}</p></div>
+          <div className="bg-slate-900/50 rounded-lg p-2 text-center backdrop-blur-sm"><p className="text-[8px] text-slate-400 uppercase">Delay</p><p className="text-lg font-bold text-orange-400">{metrics.avgDelay || 0}m</p></div>
         </div>
         
         {/* Desktop Week Nav */}
-        <div className="flex items-center justify-between bg-slate-900/50 rounded-lg p-2">
-          <Calendar size={12} className="text-purple-400" />
-          <span className="text-[10px] font-medium text-white">{formatDateRange()}</span>
-          <div className="flex gap-1">
-            <button onClick={() => setShowThemeModal(true)} className="p-1 hover:bg-white/10 rounded"><Palette size={12} className="text-purple-400" /></button>
-            <button onClick={() => setShowTimeSlotModal(true)} className="p-1 hover:bg-white/10 rounded"><Clock size={12} /></button>
+        <div className="flex items-center justify-between bg-slate-900/50 rounded-lg p-3 backdrop-blur-sm">
+          <Calendar size={14} className="text-purple-400" />
+          <span className="text-xs font-medium text-white">{formatDateRange()}</span>
+          <div className="flex gap-2">
+            <button onClick={() => setShowThemeModal(true)} className="p-1.5 hover:bg-white/10 rounded-lg transition"><Palette size={14} className="text-purple-400" /></button>
+            <button onClick={() => setShowTimeSlotModal(true)} className="p-1.5 hover:bg-white/10 rounded-lg transition"><Clock size={14} className="text-purple-400" /></button>
           </div>
         </div>
         
@@ -838,23 +904,151 @@ export default function WeekView() {
               const isPastDay = isDayInPast(date);
               const hasTasks = (tasksByDay[day] || []).length > 0;
               return (
-                <button key={day} onClick={() => { if (!isPastDay) setSelectedDay(idx); }} disabled={isPastDay} className={`flex-1 min-w-[60px] py-2 rounded-lg text-center transition ${
-                  isPastDay ? 'opacity-40 cursor-not-allowed bg-slate-800/30 text-slate-500' :
-                  selectedDay === idx ? 'bg-purple-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50'
-                } ${isToday && !isPastDay ? 'border border-purple-500/50' : ''}`}>
-                  <div className="text-[10px] font-bold">{day.slice(0, 3)}</div>
-                  <div className="text-[8px]">{date.getDate()}</div>
-                  {hasTasks && !isPastDay && <div className="w-1 h-1 rounded-full bg-green-500 mx-auto mt-0.5" />}
+                <button
+                  key={day}
+                  onClick={() => { if (!isPastDay) { setSelectedDay(idx); setVisibleSlotCount(WINDOW_SIZE); setExpandedSections({ dayView: false, weekView: false }); } }}
+                  disabled={isPastDay}
+                  className={`flex-1 min-w-[70px] py-2.5 rounded-lg text-center transition ${
+                    isPastDay ? 'opacity-40 cursor-not-allowed bg-slate-800/30 text-slate-500' :
+                    selectedDay === idx ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50'
+                  } ${isToday && !isPastDay ? 'border-2 border-purple-500' : ''}`}
+                >
+                  <div className="text-xs font-bold">{day.slice(0, 3)}</div>
+                  <div className="text-[10px] opacity-75">{date.getDate()}</div>
+                  {hasTasks && !isPastDay && <div className="w-1.5 h-1.5 rounded-full bg-green-500 mx-auto mt-1" />}
                 </button>
               );
             })}
           </div>
         )}
         
-        {/* Desktop Time Grid - Simplified for brevity, original styling would go here */}
-        <div className="bg-slate-900/60 border border-white/10 rounded-xl overflow-hidden w-full">
-          <div className="text-center p-8 text-slate-400">Desktop view - original styling preserved</div>
+        {/* Desktop Time Grid - FULL ORIGINAL */}
+        <div className="bg-slate-900/60 border border-white/10 rounded-xl overflow-hidden w-full backdrop-blur-sm">
+          <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-slate-900/40`}>
+            <div className="p-2 text-center text-[10px] font-bold text-slate-500 uppercase border-r border-white/10">Time</div>
+            {viewMode === 'week' && DAYS.map(day => {
+              const date = getDayDate(day);
+              const isPastDay = isDayInPast(date);
+              return (
+                <div key={day} className={`p-2 text-center ${isPastDay ? 'opacity-40' : ''}`}>
+                  <div className="text-xs font-bold text-white">{day.slice(0, 3)}</div>
+                  <div className="text-[9px] text-slate-400">{date.getDate()}</div>
+                </div>
+              );
+            })}
+          </div>
+          
+          {viewMode === 'day' ? (
+            <>
+              {visibleDaySlots.map((time) => {
+                const task = getTaskAtSlot(DAYS[selectedDay], time);
+                const date = getDayDate(DAYS[selectedDay]);
+                const isPast = date < getCurrentRealDate();
+                const canAdd = !isPast && !isTaskDateTimeInPast(DAYS[selectedDay], time, date);
+                return (
+                  <div key={time} className={`grid grid-cols-1 border-b border-white/10 relative ${isPast ? 'opacity-50' : ''}`}>
+                    <div className="p-2 border-r border-white/10 flex items-center justify-between bg-slate-900/30">
+                      <span className="text-[10px] font-mono text-slate-400">{time}</span>
+                    </div>
+                    <div className="p-1">
+                      {task ? (
+                        <DesktopTaskCell task={task} onUpdate={handleRefresh} theme={theme} />
+                      ) : canAdd ? (
+                        <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-slate-800/50 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
+                          <Plus size={16} className="text-slate-500" />
+                        </div>
+                      ) : (
+                        <div className="h-14 rounded-lg border border-white/10 bg-slate-800/50 opacity-30 flex items-center justify-center cursor-not-allowed">
+                          <Lock size={12} className="text-slate-600" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {hasMoreSlots && (
+                <div className="flex gap-2 p-3 bg-slate-900/30 border-t border-white/10">
+                  <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-xs text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-2 bg-purple-500/10 rounded-lg">
+                    <ChevronDown size={14} /> Load {LOAD_MORE_STEP} More
+                  </button>
+                  <button onClick={loadAllSlots} className="py-2 px-4 text-center text-xs text-slate-400 hover:text-white transition bg-slate-800/50 rounded-lg">
+                    Load All ({sortedDayTimes.length})
+                  </button>
+                </div>
+              )}
+              {visibleSlotCount > WINDOW_SIZE && (
+                <button onClick={showLessSlots} className="w-full py-2 text-center text-xs text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-2 bg-slate-900/30 border-t border-white/10">
+                  <ChevronUp size={14} /> Show Less
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              {visibleWeekSlots.map((time) => {
+                let hasAnyTask = false;
+                for (let i = 0; i < DAYS.length; i++) {
+                  if (getTaskAtSlot(DAYS[i], time)) { hasAnyTask = true; break; }
+                }
+                if (!hasAnyTask) return null;
+                
+                return (
+                  <div key={time} className="grid grid-cols-8 border-b border-white/10 relative">
+                    <div className="p-2 border-r border-white/10 flex items-center justify-center bg-slate-900/30">
+                      <span className="text-[10px] font-mono text-slate-400">{time}</span>
+                    </div>
+                    {DAYS.map(day => {
+                      const task = getTaskAtSlot(day, time);
+                      const date = getDayDate(day);
+                      const isPast = date < getCurrentRealDate();
+                      const canAdd = !isPast && !isTaskDateTimeInPast(day, time, date);
+                      return (
+                        <div key={`${day}-${time}`} className={`p-1 ${isPast ? 'opacity-50' : ''}`} onClick={() => canAdd && !task && handleSlotClick(day, time, date)}>
+                          {task ? (
+                            <DesktopTaskCell task={task} onUpdate={handleRefresh} theme={theme} />
+                          ) : canAdd ? (
+                            <div className="h-14 rounded-lg border border-dashed border-white/20 bg-slate-800/50 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
+                              <Plus size={14} className="text-slate-500" />
+                            </div>
+                          ) : (
+                            <div className="h-14 rounded-lg border border-white/10 bg-slate-800/50 opacity-30 flex items-center justify-center cursor-not-allowed">
+                              <Lock size={10} className="text-slate-600" />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+              {hasMoreWeekSlots && (
+                <div className="flex gap-2 p-3 bg-slate-900/30 border-t border-white/10">
+                  <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-xs text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-2 bg-purple-500/10 rounded-lg">
+                    <ChevronDown size={14} /> Load {LOAD_MORE_STEP} More
+                  </button>
+                  <button onClick={loadAllSlots} className="py-2 px-4 text-center text-xs text-slate-400 hover:text-white transition bg-slate-800/50 rounded-lg">
+                    Load All ({sortedWeekTimes.length})
+                  </button>
+                </div>
+              )}
+              {visibleSlotCount > WINDOW_SIZE && (
+                <button onClick={showLessSlots} className="w-full py-2 text-center text-xs text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-2 bg-slate-900/30 border-t border-white/10">
+                  <ChevronUp size={14} /> Show Less
+                </button>
+              )}
+            </>
+          )}
         </div>
+        
+        {/* Desktop Empty State */}
+        {viewMode === 'day' && currentDayTimes.length === 0 && (
+          <div className="bg-slate-900/50 rounded-xl p-8 text-center backdrop-blur-sm">
+            <Calendar size={32} className="text-slate-500 mx-auto mb-3" />
+            <p className="text-sm text-slate-400">No tasks for {DAYS[selectedDay]}</p>
+            <button onClick={() => setShowAddModal(true)} className="mt-3 px-4 py-2 rounded-lg bg-purple-600 text-white text-sm hover:bg-purple-700 transition">
+              Add Task
+            </button>
+          </div>
+        )}
         
         {/* Desktop Modals */}
         <TaskModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} onSave={handleAddTask} theme={theme} day={DAYS[selectedDay]} weekStartDate={getWeekStart(selectedDate)} isMobile={false} />
@@ -862,11 +1056,11 @@ export default function WeekView() {
         
         {showThemeModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-slate-900 rounded-xl p-4 w-80">
-              <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Theme</h3><button onClick={() => setShowThemeModal(false)}><X size={14} /></button></div>
-              <div className="space-y-2">
-                <div><label className="text-[10px] text-slate-400">Primary</label><input type="color" value={theme.primary} onChange={e => handleThemeUpdate({...theme, primary: e.target.value})} className="w-full h-8 rounded-lg mt-1" /></div>
-                <div><label className="text-[10px] text-slate-400">Secondary</label><input type="color" value={theme.secondary} onChange={e => handleThemeUpdate({...theme, secondary: e.target.value})} className="w-full h-8 rounded-lg mt-1" /></div>
+            <div className="bg-slate-900 rounded-xl p-5 w-96 shadow-2xl">
+              <div className="flex justify-between mb-4"><h3 className="text-base font-bold text-white">Customize Theme</h3><button onClick={() => setShowThemeModal(false)} className="text-slate-400 hover:text-white"><X size={18} /></button></div>
+              <div className="space-y-3">
+                <div><label className="text-xs text-slate-400 block mb-1">Primary Color</label><input type="color" value={theme.primary} onChange={e => handleThemeUpdate({...theme, primary: e.target.value})} className="w-full h-10 rounded-lg bg-slate-800 border border-white/10 cursor-pointer" /></div>
+                <div><label className="text-xs text-slate-400 block mb-1">Secondary Color</label><input type="color" value={theme.secondary} onChange={e => handleThemeUpdate({...theme, secondary: e.target.value})} className="w-full h-10 rounded-lg bg-slate-800 border border-white/10 cursor-pointer" /></div>
               </div>
             </div>
           </div>
@@ -874,14 +1068,14 @@ export default function WeekView() {
         
         {showTimeSlotModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-slate-900 rounded-xl p-4 w-80">
-              <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Time Slots</h3><button onClick={() => setShowTimeSlotModal(false)}><X size={14} /></button></div>
-              <div className="flex gap-2 mb-3"><input type="time" value={newTimeSlot} onChange={e => setNewTimeSlot(e.target.value)} className="flex-1 p-1.5 text-xs rounded bg-slate-800 border border-white/10" /><button onClick={handleAddTimeSlot} className="px-3 py-1.5 rounded text-xs bg-purple-600">Add</button></div>
-              <div className="space-y-1 max-h-48 overflow-y-auto">
+            <div className="bg-slate-900 rounded-xl p-5 w-96 shadow-2xl">
+              <div className="flex justify-between mb-4"><h3 className="text-base font-bold text-white">Manage Time Slots</h3><button onClick={() => setShowTimeSlotModal(false)} className="text-slate-400 hover:text-white"><X size={18} /></button></div>
+              <div className="flex gap-2 mb-4"><input type="time" value={newTimeSlot} onChange={e => setNewTimeSlot(e.target.value)} className="flex-1 p-2 text-sm rounded-lg bg-slate-800 border border-white/10 text-white" /><button onClick={handleAddTimeSlot} className="px-4 py-2 rounded-lg text-sm bg-purple-600 text-white hover:bg-purple-700 transition">Add</button></div>
+              <div className="space-y-1 max-h-64 overflow-y-auto">
                 {timeSlots.map(slot => (
-                  <div key={slot} className="flex justify-between items-center p-1.5 rounded bg-slate-800/50">
-                    <span className="text-xs">{slot}</span>
-                    <button onClick={() => handleRemoveTimeSlot(slot)} className="text-red-400 text-[9px]">Remove</button>
+                  <div key={slot} className="flex justify-between items-center p-2 rounded-lg bg-slate-800/50">
+                    <span className="text-sm text-white">{slot}</span>
+                    <button onClick={() => handleRemoveTimeSlot(slot)} className="text-red-400 text-xs hover:text-red-300 transition">Remove</button>
                   </div>
                 ))}
               </div>

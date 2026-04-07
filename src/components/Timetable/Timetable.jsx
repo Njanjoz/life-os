@@ -59,6 +59,7 @@ export default function Timetable() {
       setLoading(true);
       const week = await getCurrentWeek(selectedDate);
       const all = await getWeekTasks(week.id);
+      // Filter out rescheduled tasks and ensure unique tasks by ID
       setTasks(all.filter(t => !t.rescheduledTo));
     } catch (e) {
       console.error(e);
@@ -98,18 +99,33 @@ export default function Timetable() {
   };
 
   const weekNumber = Math.ceil((selectedDate - new Date(selectedDate.getFullYear(), 0, 1)) / 86400000 / 7);
+  
+  // Get unique times from tasks, ensuring no duplicates
   const allTimes = [...new Set(tasks.map(t => t.startTime))].sort();
   if (!allTimes.length) for (let h = 6; h <= 22; h++) allTimes.push(`${String(h).padStart(2, '0')}:00`);
 
-  const uniqueTitles = [...new Set(tasks.map(t => t.title))];
+  // Create a map for quick task lookup by day and time to prevent duplicates
+  const taskMap = new Map();
+  tasks.forEach(task => {
+    const key = `${task.day}-${task.startTime}`;
+    // Only add if not already present (keeps first occurrence)
+    if (!taskMap.has(key)) {
+      taskMap.set(key, task);
+    }
+  });
+
+  // Get unique tasks for display
+  const uniqueTasks = Array.from(taskMap.values());
+  
+  const uniqueTitles = [...new Set(uniqueTasks.map(t => t.title))];
   const titleColor = Object.fromEntries(uniqueTitles.map((t, i) => [t, ['#c9a53b', '#8b7355', '#b8860b', '#d4af37', '#cd7f32'][i % 5]]));
 
   const todayIdx = (new Date().getDay() + 6) % 7;
   const randomQuote = QUOTES[Math.floor(Math.random() * QUOTES.length)];
-  const completedCount = tasks.filter(t => t.status === 'completed').length;
-  const missedCount = tasks.filter(t => t.status === 'missed').length;
-  const reschdCount = tasks.filter(t => t.status === 'rescheduled').length;
-  const pct = tasks.length ? Math.round(completedCount / tasks.length * 100) : 0;
+  const completedCount = uniqueTasks.filter(t => t.status === 'completed').length;
+  const missedCount = uniqueTasks.filter(t => t.status === 'missed').length;
+  const reschdCount = uniqueTasks.filter(t => t.status === 'rescheduled').length;
+  const pct = uniqueTasks.length ? Math.round(completedCount / uniqueTasks.length * 100) : 0;
 
   const cycleStatus = async (task, e) => {
     e.stopPropagation();
@@ -176,7 +192,9 @@ export default function Timetable() {
     const userName = firebaseUser?.displayName || firebaseUser?.email || 'User';
     const firstName = userName.split(' ')[0];
     
-    const printTimes = [...allTimes];
+    // Use unique tasks for printing
+    const printTasks = uniqueTasks;
+    const printTimes = [...new Set(printTasks.map(t => t.startTime))].sort();
     if (!printTimes.length) for (let h = 6; h <= 22; h++) printTimes.push(`${String(h).padStart(2, '0')}:00`);
     
     const rows = printTimes.length;
@@ -185,6 +203,15 @@ export default function Timetable() {
     const rowHeight = Math.max(32, Math.min(50, Math.floor(550 / rows)));
     const headerFontSize = Math.max(16, Math.min(24, 26 - Math.floor(rows / 6)));
     const weekQuote = QUOTES[weekNumber % QUOTES.length];
+    
+    // Create a map for quick task lookup in print (ensures no duplicates)
+    const printTaskMap = new Map();
+    printTasks.forEach(task => {
+      const key = `${task.day}-${task.startTime}`;
+      if (!printTaskMap.has(key)) {
+        printTaskMap.set(key, task);
+      }
+    });
     
     win.document.write(`
 <!DOCTYPE html>
@@ -195,7 +222,6 @@ export default function Timetable() {
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    /* NO forced orientation - user chooses in print dialog */
     @page { 
       margin: 0.15in;
     }
@@ -553,7 +579,9 @@ export default function Timetable() {
         <tr>
           <td class="time-col"><span class="time-text">${time}</span></td>
           ${DAYS.map(day => {
-            const task = tasks.find(t => t.day === day && t.startTime === time);
+            // Use the printTaskMap to get unique task for this day and time
+            const taskKey = `${day}-${time}`;
+            const task = printTaskMap.get(taskKey);
             const taskColor = task ? (titleColor[task.title] || '#c9a53b') : '#d4c5b0';
             return `
               <td>
@@ -592,7 +620,7 @@ export default function Timetable() {
         </tr>
       `).join('')}
     </tbody>
-  </table>
+   </table>
 
   <div class="manual-scoring">
     <div class="score-item">
@@ -648,7 +676,7 @@ export default function Timetable() {
     </div>
   );
 
-  const dayTasks = tasks.filter(t => t.day === DAYS[selectedDay]);
+  const dayTasks = uniqueTasks.filter(t => t.day === DAYS[selectedDay]);
   const dayTimes = [...new Set(dayTasks.map(t => t.startTime))].sort();
 
   const WeekCell = ({ task }) => {
@@ -727,7 +755,7 @@ export default function Timetable() {
 
         <div className="bg-gray-50 rounded-xl border border-gray-200 p-3 flex items-center gap-3 flex-wrap">
           {[
-            { n: tasks.length, l: 'Total', c: 'text-gray-600' },
+            { n: uniqueTasks.length, l: 'Total', c: 'text-gray-600' },
             { n: completedCount, l: 'Done', c: 'text-emerald-600' },
             { n: missedCount, l: 'Missed', c: 'text-red-600' },
             { n: reschdCount, l: 'Moved', c: 'text-amber-600' },
@@ -756,7 +784,7 @@ export default function Timetable() {
           {DAYS.map((day, idx) => {
             const isSel = selectedDay === idx;
             const isToday = todayIdx === idx;
-            const dt = tasks.filter(t => t.day === day);
+            const dt = uniqueTasks.filter(t => t.day === day);
             const dp = dt.length ? Math.round(dt.filter(t => t.status === 'completed').length / dt.length * 100) : 0;
             return (
               <button key={day} onClick={() => { setSelectedDay(idx); setViewMode('day'); }}
@@ -789,7 +817,7 @@ export default function Timetable() {
               ))}
             </div>
             {allTimes.map(time => {
-              const tasksInRow = DAYS.map(d => tasks.filter(t => t.day === d && t.startTime === time));
+              const tasksInRow = DAYS.map(d => uniqueTasks.filter(t => t.day === d && t.startTime === time));
               const maxStack = Math.max(1, ...tasksInRow.map(a => a.length));
               return (
                 <div key={time} className="grid grid-cols-8 border-b border-gray-100 last:border-b-0" style={{ minHeight: `${Math.max(44, maxStack * 52)}px` }}>

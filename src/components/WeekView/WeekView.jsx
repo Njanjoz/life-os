@@ -1,4 +1,4 @@
-// src/components/WeekView/WeekView.jsx - Fixed filter menu positioning
+// src/components/WeekView/WeekView.jsx - Fixed filter menu positioning & Load More/Load All functionality
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2 } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
@@ -225,6 +225,7 @@ export default function WeekView() {
   // Reset visible slot count when changing days or view mode
   useEffect(() => {
     setVisibleSlotCount(WINDOW_SIZE);
+    setExpandedSections({ dayView: false, weekView: false });
   }, [selectedDay, viewMode]);
 
   // Optimized notification system
@@ -256,6 +257,7 @@ export default function WeekView() {
     setRefreshKey(prev => prev + 1);
     notifiedTasksRef.current.clear();
     setVisibleSlotCount(WINDOW_SIZE);
+    setExpandedSections({ dayView: false, weekView: false });
     sortedCacheRef.current = {};
   }, []);
 
@@ -265,6 +267,7 @@ export default function WeekView() {
     setSelectedDate(normalizeDate(newDate));
     notifiedTasksRef.current.clear();
     setVisibleSlotCount(WINDOW_SIZE);
+    setExpandedSections({ dayView: false, weekView: false });
     sortedCacheRef.current = {};
   };
 
@@ -381,22 +384,26 @@ export default function WeekView() {
   const currentSlotIndex = getCurrentTimeSlotIndex();
   const startIndex = Math.max(0, currentSlotIndex - 1);
 
+  // FIXED: visible slots logic - now properly handles Load More/Load All
   const visibleDaySlots = useMemo(() => {
-    if (expandedSections['dayView']) {
+    // If expanded OR if we've loaded more than WINDOW_SIZE, show the full visibleSlotCount
+    if (expandedSections['dayView'] || visibleSlotCount > WINDOW_SIZE) {
       return sortedDayTimes.slice(0, visibleSlotCount);
     }
     return sortedDayTimes.slice(startIndex, startIndex + WINDOW_SIZE);
   }, [expandedSections, sortedDayTimes, startIndex, visibleSlotCount]);
 
   const visibleWeekSlots = useMemo(() => {
-    if (expandedSections['weekView']) {
+    // If expanded OR if we've loaded more than WINDOW_SIZE, show the full visibleSlotCount
+    if (expandedSections['weekView'] || visibleSlotCount > WINDOW_SIZE) {
       return sortedWeekTimes.slice(0, visibleSlotCount);
     }
     return sortedWeekTimes.slice(0, WINDOW_SIZE);
   }, [expandedSections, sortedWeekTimes, visibleSlotCount]);
 
-  const hasMoreSlots = sortedDayTimes.length > visibleSlotCount && expandedSections['dayView'];
-  const hasMoreWeekSlots = sortedWeekTimes.length > visibleSlotCount && expandedSections['weekView'];
+  // FIXED: has more slots condition
+  const hasMoreSlots = sortedDayTimes.length > visibleSlotCount;
+  const hasMoreWeekSlots = sortedWeekTimes.length > visibleSlotCount;
 
   const toggleSortOrder = useCallback(() => {
     if (isSorting) return;
@@ -413,13 +420,35 @@ export default function WeekView() {
     }, 100);
   }, [isSorting]);
 
+  // FIXED: Load more slots - uses correct max length for current view
   const loadMoreSlots = useCallback(() => {
-    setVisibleSlotCount(prev => Math.min(prev + LOAD_MORE_STEP, sortedDayTimes.length));
-  }, [sortedDayTimes.length]);
+    const maxLength = viewMode === 'day' ? sortedDayTimes.length : sortedWeekTimes.length;
+    setVisibleSlotCount(prev => Math.min(prev + LOAD_MORE_STEP, maxLength));
+    // Auto-expand the section when loading more
+    if (viewMode === 'day') {
+      setExpandedSections(prev => ({ ...prev, dayView: true }));
+    } else {
+      setExpandedSections(prev => ({ ...prev, weekView: true }));
+    }
+  }, [sortedDayTimes.length, sortedWeekTimes.length, viewMode]);
 
+  // FIXED: Load all slots - uses correct max length for current view
   const loadAllSlots = useCallback(() => {
-    setVisibleSlotCount(sortedDayTimes.length);
-  }, [sortedDayTimes.length]);
+    const maxLength = viewMode === 'day' ? sortedDayTimes.length : sortedWeekTimes.length;
+    setVisibleSlotCount(maxLength);
+    // Auto-expand the section when loading all
+    if (viewMode === 'day') {
+      setExpandedSections(prev => ({ ...prev, dayView: true }));
+    } else {
+      setExpandedSections(prev => ({ ...prev, weekView: true }));
+    }
+  }, [sortedDayTimes.length, sortedWeekTimes.length, viewMode]);
+
+  // FIXED: Show Less - resets to WINDOW_SIZE and collapses
+  const showLessSlots = useCallback(() => {
+    setVisibleSlotCount(WINDOW_SIZE);
+    setExpandedSections({ dayView: false, weekView: false });
+  }, []);
 
   const toggleSection = useCallback((sectionId) => {
     setExpandedSections(prev => ({
@@ -694,6 +723,7 @@ export default function WeekView() {
                       if (!isPastDay) {
                         setSelectedDay(idx);
                         setVisibleSlotCount(WINDOW_SIZE);
+                        setExpandedSections({ dayView: false, weekView: false });
                       }
                     }}
                     disabled={isPastDay}
@@ -771,6 +801,7 @@ export default function WeekView() {
                   );
                 })}
                 
+                {/* Load More/Load All buttons for Day View */}
                 {hasMoreSlots && (
                   <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
                     <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-purple-500/10 rounded-lg">
@@ -782,8 +813,9 @@ export default function WeekView() {
                   </div>
                 )}
                 
-                {expandedSections['dayView'] && visibleSlotCount > WINDOW_SIZE && (
-                  <button onClick={() => setVisibleSlotCount(WINDOW_SIZE)} className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10">
+                {/* Show Less button for Day View */}
+                {visibleSlotCount > WINDOW_SIZE && (
+                  <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10">
                     <ChevronUp size={12} /> Show Less (back to {WINDOW_SIZE} slots)
                   </button>
                 )}
@@ -848,6 +880,7 @@ export default function WeekView() {
                   );
                 })}
                 
+                {/* Load More/Load All buttons for Week View */}
                 {hasMoreWeekSlots && (
                   <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
                     <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-purple-500/10 rounded-lg">
@@ -859,8 +892,9 @@ export default function WeekView() {
                   </div>
                 )}
                 
-                {expandedSections['weekView'] && visibleSlotCount > WINDOW_SIZE && (
-                  <button onClick={() => setVisibleSlotCount(WINDOW_SIZE)} className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10">
+                {/* Show Less button for Week View */}
+                {visibleSlotCount > WINDOW_SIZE && (
+                  <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-purple-400 hover:text-purple-300 transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10">
                     <ChevronUp size={12} /> Show Less (back to {WINDOW_SIZE} slots)
                   </button>
                 )}

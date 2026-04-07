@@ -1,4 +1,4 @@
-// src/services/firebaseTaskService.js - FULLY FIXED VERSION
+// src/services/firebaseTaskService.js - COMPLETELY FIXED WITH ABSOLUTE DATES
 import { 
   db, auth, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, 
   query, where, Timestamp, writeBatch 
@@ -21,6 +21,27 @@ export const getStartOfWeek = (date) => {
   d.setDate(d.getDate() - diff);
   d.setHours(0, 0, 0, 0);
   return d;
+};
+
+// Helper function to calculate absolute task dates
+const calculateTaskAbsoluteDates = (weekId, day, startTime, endTime) => {
+  const weekStart = new Date(weekId.split('_')[1]);
+  const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const taskDayIndex = daysOfWeek.indexOf(day);
+  
+  const taskDate = new Date(weekStart);
+  taskDate.setDate(weekStart.getDate() + taskDayIndex);
+  
+  const [startHour, startMin] = startTime.split(':').map(Number);
+  const [endHour, endMin] = endTime.split(':').map(Number);
+  
+  const startDateTime = new Date(taskDate);
+  startDateTime.setHours(startHour, startMin, 0, 0);
+  
+  const endDateTime = new Date(taskDate);
+  endDateTime.setHours(endHour, endMin, 0, 0);
+  
+  return { startDateTime, endDateTime };
 };
 
 const calculateMetrics = (tasks) => {
@@ -162,6 +183,14 @@ export const addTask = async (weekId, taskData) => {
   const userId = getUserId();
   const taskId = `${weekId}_${taskData.day}_${taskData.startTime}_${Date.now()}`;
   
+  // Calculate absolute dates
+  const { startDateTime, endDateTime } = calculateTaskAbsoluteDates(
+    weekId, 
+    taskData.day, 
+    taskData.startTime, 
+    taskData.endTime
+  );
+  
   const taskRef = doc(db, TASKS_COLLECTION, taskId);
   const newTask = {
     id: taskId,
@@ -173,6 +202,9 @@ export const addTask = async (weekId, taskData) => {
     day: taskData.day,
     startTime: taskData.startTime,
     endTime: taskData.endTime,
+    // CRITICAL: Store absolute dates
+    scheduledStart: Timestamp.fromDate(startDateTime),
+    scheduledEnd: Timestamp.fromDate(endDateTime),
     status: 'pending',
     completion: 0,
     actualStart: null,
@@ -205,10 +237,33 @@ export const addTask = async (weekId, taskData) => {
 
 export const updateTask = async (taskId, updates) => {
   const taskRef = doc(db, TASKS_COLLECTION, taskId);
-  await updateDoc(taskRef, { ...updates, updatedAt: Timestamp.now() });
   const taskDoc = await getDoc(taskRef);
-  const task = taskDoc.data();
-  if (task && task.weekId) await updateWeekMetrics(task.weekId);
+  const existingTask = taskDoc.data();
+  
+  if (!existingTask) throw new Error('Task not found');
+  
+  // If day, startTime, or endTime changed, recalculate absolute dates
+  let updatedData = { ...updates, updatedAt: Timestamp.now() };
+  
+  if (updates.day || updates.startTime || updates.endTime) {
+    const finalDay = updates.day || existingTask.day;
+    const finalStartTime = updates.startTime || existingTask.startTime;
+    const finalEndTime = updates.endTime || existingTask.endTime;
+    
+    const { startDateTime, endDateTime } = calculateTaskAbsoluteDates(
+      existingTask.weekId,
+      finalDay,
+      finalStartTime,
+      finalEndTime
+    );
+    
+    updatedData.scheduledStart = Timestamp.fromDate(startDateTime);
+    updatedData.scheduledEnd = Timestamp.fromDate(endDateTime);
+  }
+  
+  await updateDoc(taskRef, updatedData);
+  
+  if (existingTask.weekId) await updateWeekMetrics(existingTask.weekId);
 };
 
 export const startTask = async (taskId, actualStartTime = null) => {
@@ -220,11 +275,8 @@ export const startTask = async (taskId, actualStartTime = null) => {
   if (!task) throw new Error('Task not found');
   if (task.status === 'completed') return;
   
-  const [startHour, startMin] = task.startTime.split(':').map(Number);
-  const plannedStart = new Date(task.createdAt.toDate());
-  const dayOffset = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].indexOf(task.day);
-  plannedStart.setDate(plannedStart.getDate() + dayOffset);
-  plannedStart.setHours(startHour, startMin, 0, 0);
+  // Use scheduledStart for accurate delay calculation
+  const plannedStart = task.scheduledStart ? task.scheduledStart.toDate() : new Date();
   
   const delayMinutes = Math.max(0, (actualStart - plannedStart) / 60000);
   
@@ -247,15 +299,10 @@ export const completeTask = async (taskId, actualEndTime = null, completionType 
   if (!task) throw new Error('Task not found');
   
   const actualStart = task.actualStart ? task.actualStart.toDate() : new Date();
-  const [startHour, startMin] = task.startTime.split(':').map(Number);
-  const [endHour, endMin] = task.endTime.split(':').map(Number);
   
-  const plannedStart = new Date(task.createdAt.toDate());
-  const dayOffset = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].indexOf(task.day);
-  plannedStart.setDate(plannedStart.getDate() + dayOffset);
-  plannedStart.setHours(startHour, startMin, 0, 0);
-  const scheduledEnd = new Date(plannedStart);
-  scheduledEnd.setHours(endHour, endMin, 0, 0);
+  // Use scheduled dates for accurate comparison
+  const scheduledStart = task.scheduledStart ? task.scheduledStart.toDate() : new Date();
+  const scheduledEnd = task.scheduledEnd ? task.scheduledEnd.toDate() : new Date();
   
   let finalCompletionType = completionType;
   if (!finalCompletionType) {
@@ -264,7 +311,7 @@ export const completeTask = async (taskId, actualEndTime = null, completionType 
     else finalCompletionType = 'late';
   }
   
-  const plannedDuration = ((endHour * 60 + endMin) - (startHour * 60 + startMin));
+  const plannedDuration = (scheduledEnd - scheduledStart) / 60000;
   const actualDuration = (actualEnd - actualStart) / 60000;
   
   let accuracy = 100;
@@ -349,6 +396,14 @@ export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, w
   const newTaskId = `${originalTask.weekId}_${newDay}_${newStartTime}_${Date.now()}`;
   const newTaskRef = doc(db, TASKS_COLLECTION, newTaskId);
   
+  // Calculate absolute dates for the rescheduled task
+  const { startDateTime, endDateTime } = calculateTaskAbsoluteDates(
+    originalTask.weekId,
+    newDay,
+    newStartTime,
+    newEndTime
+  );
+  
   batch.set(newTaskRef, {
     id: newTaskId,
     userId: originalTask.userId,
@@ -359,6 +414,8 @@ export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, w
     day: newDay,
     startTime: newStartTime,
     endTime: newEndTime,
+    scheduledStart: Timestamp.fromDate(startDateTime),
+    scheduledEnd: Timestamp.fromDate(endDateTime),
     status: 'pending',
     completion: 0,
     manualProgress: 0,
@@ -432,68 +489,156 @@ export const updateWeekMetrics = async (weekId) => {
   });
 };
 
-// ============ COMPLETELY FIXED: checkMissedTasks - ONLY checks PAST weeks ============
+// ============ FIXED: checkMissedTasks USING ABSOLUTE DATES ============
 export const checkMissedTasks = async (weekId, selectedDate) => {
   const tasks = await getWeekTasks(weekId);
   let updated = false;
   const batch = writeBatch(db);
   
-  // Get the week data
-  const weekRef = doc(db, WEEKS_COLLECTION, weekId);
-  const weekDoc = await getDoc(weekRef);
-  
-  if (!weekDoc.exists()) {
-    return;
-  }
-  
-  const weekData = weekDoc.data();
-  const weekStart = weekData.weekStart.toDate();
-  
-  const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  
-  // Get today's date (start of day)
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
-  // CRITICAL: If this week is in the FUTURE, don't mark any tasks as missed
-  if (weekStart > today) {
-    console.log(`[checkMissedTasks] Week ${weekStart.toDateString()} is in the future, skipping missed check`);
-    return;
-  }
-  
   const now = new Date();
   
   for (const task of tasks) {
-    // Only check pending tasks with actual titles
-    if (task.status === 'pending' && task.title && task.title.trim() !== '' && !task.rescheduledFrom) {
-      
-      // Calculate task's actual date
+    // Skip completed, rescheduled, or placeholder tasks
+    if (task.status === 'completed' || task.status === 'rescheduled') continue;
+    if (!task.title || task.title.trim() === '') continue;
+    if (task.rescheduledFrom) continue;
+    
+    // Use the stored absolute end date if available
+    let taskEndTime;
+    if (task.scheduledEnd) {
+      taskEndTime = task.scheduledEnd.toDate();
+    } else {
+      // Fallback for old tasks (calculate from weekId)
+      const weekStart = new Date(weekId.split('_')[1]);
+      const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
       const taskDayIndex = daysOfWeek.indexOf(task.day);
       const taskDate = new Date(weekStart);
       taskDate.setDate(weekStart.getDate() + taskDayIndex);
-      
       const [endHour, endMin] = task.endTime.split(':').map(Number);
-      const endTime = new Date(taskDate);
-      endTime.setHours(endHour, endMin, 0, 0);
-      
-      // ONLY mark as missed if the task's date is in the PAST (before today)
-      if (taskDate < today) {
-        const taskRef = doc(db, TASKS_COLLECTION, task.id);
-        batch.update(taskRef, {
-          status: 'missed',
-          missedReason: 'overdue',
-          updatedAt: Timestamp.now()
-        });
-        updated = true;
-        console.log(`[checkMissedTasks] Marked task as missed: ${task.title} on ${task.day} (date: ${taskDate.toDateString()})`);
-      }
+      taskEndTime = new Date(taskDate);
+      taskEndTime.setHours(endHour, endMin, 0, 0);
+    }
+    
+    // Check if task is in the future
+    const isTaskInFuture = taskEndTime > now;
+    
+    // Check if task is overdue (end time passed)
+    const isOverdue = taskEndTime < now;
+    
+    const taskRef = doc(db, TASKS_COLLECTION, task.id);
+    
+    if (isOverdue && task.status === 'pending' && !isTaskInFuture) {
+      // Mark as missed only if not in future
+      batch.update(taskRef, {
+        status: 'missed',
+        missedReason: 'overdue',
+        updatedAt: Timestamp.now()
+      });
+      updated = true;
+      console.log(`[MISSED] ${task.title} (${task.day} ${task.startTime}) ended at ${taskEndTime}`);
+    } 
+    else if (!isOverdue && task.status === 'missed') {
+      // Restore if not overdue
+      batch.update(taskRef, {
+        status: 'pending',
+        missedReason: null,
+        updatedAt: Timestamp.now()
+      });
+      updated = true;
+      console.log(`[RESTORED] ${task.title} (${task.day} ${task.startTime}) - was incorrectly marked as missed`);
+    }
+    else if (isTaskInFuture && task.status === 'missed') {
+      // Restore future tasks that were wrongly marked
+      batch.update(taskRef, {
+        status: 'pending',
+        missedReason: null,
+        updatedAt: Timestamp.now()
+      });
+      updated = true;
+      console.log(`[RESTORED FUTURE] ${task.title} (${task.day} ${task.startTime}) - future tasks cannot be missed`);
     }
   }
   
   if (updated) {
     await batch.commit();
     await updateWeekMetrics(weekId);
+    console.log(`[checkMissedTasks] Completed with updates`);
   }
+};
+
+// ============ RESTORE ALL MISSED TASKS ============
+export const restoreAllMissedTasks = async () => {
+  const userId = getUserId();
+  const q = query(
+    collection(db, TASKS_COLLECTION), 
+    where('userId', '==', userId), 
+    where('status', '==', 'missed')
+  );
+  const querySnapshot = await getDocs(q);
+  
+  const batch = writeBatch(db);
+  let count = 0;
+  
+  for (const taskDoc of querySnapshot.docs) {
+    batch.update(taskDoc.ref, {
+      status: 'pending',
+      missedReason: null,
+      updatedAt: Timestamp.now()
+    });
+    count++;
+  }
+  
+  if (count > 0) {
+    await batch.commit();
+    console.log(`[restoreAllMissedTasks] Restored ${count} tasks from missed to pending`);
+  }
+  
+  return count;
+};
+
+// ============ FIX MISSED TASKS FOR A SPECIFIC WEEK ============
+export const fixMissedTasksForWeek = async (weekId) => {
+  const tasks = await getWeekTasks(weekId);
+  const batch = writeBatch(db);
+  let count = 0;
+  
+  for (const task of tasks) {
+    if (task.status === 'missed') {
+      // Check if it should actually be missed
+      let taskEndTime;
+      if (task.scheduledEnd) {
+        taskEndTime = task.scheduledEnd.toDate();
+      } else {
+        const weekStart = new Date(weekId.split('_')[1]);
+        const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const taskDayIndex = daysOfWeek.indexOf(task.day);
+        const taskDate = new Date(weekStart);
+        taskDate.setDate(weekStart.getDate() + taskDayIndex);
+        const [endHour, endMin] = task.endTime.split(':').map(Number);
+        taskEndTime = new Date(taskDate);
+        taskEndTime.setHours(endHour, endMin, 0, 0);
+      }
+      
+      const now = new Date();
+      const shouldBeMissed = taskEndTime < now;
+      
+      if (!shouldBeMissed) {
+        batch.update(doc(db, TASKS_COLLECTION, task.id), {
+          status: 'pending',
+          missedReason: null,
+          updatedAt: Timestamp.now()
+        });
+        count++;
+      }
+    }
+  }
+  
+  if (count > 0) {
+    await batch.commit();
+    await updateWeekMetrics(weekId);
+  }
+  
+  return count;
 };
 
 export const getBestFocusHours = async () => {

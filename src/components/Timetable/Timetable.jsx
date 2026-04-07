@@ -59,7 +59,6 @@ export default function Timetable() {
       setLoading(true);
       const week = await getCurrentWeek(selectedDate);
       const all = await getWeekTasks(week.id);
-      // Filter out rescheduled tasks and ensure unique tasks by ID
       setTasks(all.filter(t => !t.rescheduledTo));
     } catch (e) {
       console.error(e);
@@ -100,32 +99,18 @@ export default function Timetable() {
 
   const weekNumber = Math.ceil((selectedDate - new Date(selectedDate.getFullYear(), 0, 1)) / 86400000 / 7);
   
-  // Get unique times from tasks, ensuring no duplicates
   const allTimes = [...new Set(tasks.map(t => t.startTime))].sort();
   if (!allTimes.length) for (let h = 6; h <= 22; h++) allTimes.push(`${String(h).padStart(2, '0')}:00`);
 
-  // Create a map for quick task lookup by day and time to prevent duplicates
-  const taskMap = new Map();
-  tasks.forEach(task => {
-    const key = `${task.day}-${task.startTime}`;
-    // Only add if not already present (keeps first occurrence)
-    if (!taskMap.has(key)) {
-      taskMap.set(key, task);
-    }
-  });
-
-  // Get unique tasks for display
-  const uniqueTasks = Array.from(taskMap.values());
-  
-  const uniqueTitles = [...new Set(uniqueTasks.map(t => t.title))];
+  const uniqueTitles = [...new Set(tasks.map(t => t.title))];
   const titleColor = Object.fromEntries(uniqueTitles.map((t, i) => [t, ['#c9a53b', '#8b7355', '#b8860b', '#d4af37', '#cd7f32'][i % 5]]));
 
   const todayIdx = (new Date().getDay() + 6) % 7;
   const randomQuote = QUOTES[Math.floor(Math.random() * QUOTES.length)];
-  const completedCount = uniqueTasks.filter(t => t.status === 'completed').length;
-  const missedCount = uniqueTasks.filter(t => t.status === 'missed').length;
-  const reschdCount = uniqueTasks.filter(t => t.status === 'rescheduled').length;
-  const pct = uniqueTasks.length ? Math.round(completedCount / uniqueTasks.length * 100) : 0;
+  const completedCount = tasks.filter(t => t.status === 'completed').length;
+  const missedCount = tasks.filter(t => t.status === 'missed').length;
+  const reschdCount = tasks.filter(t => t.status === 'rescheduled').length;
+  const pct = tasks.length ? Math.round(completedCount / tasks.length * 100) : 0;
 
   const cycleStatus = async (task, e) => {
     e.stopPropagation();
@@ -192,24 +177,37 @@ export default function Timetable() {
     const userName = firebaseUser?.displayName || firebaseUser?.email || 'User';
     const firstName = userName.split(' ')[0];
     
-    // Use unique tasks for printing
-    const printTasks = uniqueTasks;
-    const printTimes = [...new Set(printTasks.map(t => t.startTime))].sort();
-    if (!printTimes.length) for (let h = 6; h <= 22; h++) printTimes.push(`${String(h).padStart(2, '0')}:00`);
-    
+    const printTimes = [...allTimes];
     const rows = printTimes.length;
-    // Dynamic scaling based on number of rows
-    const baseFontSize = Math.max(5.5, Math.min(9, Math.floor(110 / rows)));
-    const rowHeight = Math.max(32, Math.min(50, Math.floor(550 / rows)));
+    
+    // ADAPTIVE SCALING - Calculate sizes based on number of time slots
+    // A4 page height is ~1123px (at 96dpi), we need to fit everything
+    const maxPageHeight = 1050; // Safe margin for A4
+    const headerHeight = 180; // Approximate header + stats + quote + checklist
+    const footerHeight = 60;
+    const availableHeight = maxPageHeight - headerHeight - footerHeight;
+    
+    // Calculate optimal row height (minimum 28px, maximum 50px)
+    let rowHeight = Math.floor(availableHeight / rows);
+    rowHeight = Math.max(28, Math.min(50, rowHeight));
+    
+    // Calculate font sizes based on row height and row count
+    const baseFontSize = Math.max(5.5, Math.min(8.5, Math.floor(rowHeight / 5.5)));
+    const titleFontSize = Math.max(14, Math.min(22, 24 - Math.floor(rows / 8)));
     const headerFontSize = Math.max(16, Math.min(24, 26 - Math.floor(rows / 6)));
+    const timeFontSize = Math.max(6, baseFontSize - 1);
+    const taskTitleFontSize = Math.max(6.5, baseFontSize - 0.5);
+    const taskTimeFontSize = Math.max(5, baseFontSize - 1.5);
+    const optionFontSize = Math.max(4.5, baseFontSize - 2);
+    
     const weekQuote = QUOTES[weekNumber % QUOTES.length];
     
-    // Create a map for quick task lookup in print (ensures no duplicates)
-    const printTaskMap = new Map();
-    printTasks.forEach(task => {
+    // Create task map to prevent duplicates
+    const taskMap = new Map();
+    tasks.forEach(task => {
       const key = `${task.day}-${task.startTime}`;
-      if (!printTaskMap.has(key)) {
-        printTaskMap.set(key, task);
+      if (!taskMap.has(key)) {
+        taskMap.set(key, task);
       }
     });
     
@@ -223,7 +221,8 @@ export default function Timetable() {
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     @page { 
-      margin: 0.15in;
+      size: A4;
+      margin: 0.2in;
     }
     body {
       background: #faf8f5;
@@ -239,21 +238,24 @@ export default function Timetable() {
       display: flex; 
       justify-content: center; 
       gap: 10px; 
-      margin-bottom: 10px; 
-      padding: 8px;
+      margin-bottom: 8px; 
+      padding: 6px;
     }
     .print-buttons button { 
-      padding: 8px 20px; 
+      padding: 6px 16px; 
       border: none; 
       border-radius: 6px; 
-      font-size: 12px; 
+      font-size: 11px; 
       cursor: pointer; 
       font-weight: 600; 
       font-family: 'Inter', sans-serif; 
     }
     .btn-print { background: #8b7355; color: white; }
     .btn-close { background: #e8e0d5; color: #5c4a32; }
-    @media print { .print-buttons { display: none; } }
+    @media print { 
+      .print-buttons { display: none; } 
+      body { margin: 0; padding: 0; }
+    }
     
     .container { 
       width: 100%; 
@@ -265,12 +267,12 @@ export default function Timetable() {
       display: flex; 
       justify-content: space-between; 
       align-items: flex-end; 
-      margin-bottom: 8px; 
-      padding-bottom: 5px; 
+      margin-bottom: 6px; 
+      padding-bottom: 4px; 
       border-bottom: 2px solid #c9a53b; 
     }
     .title h1 { 
-      font-size: ${headerFontSize}px; 
+      font-size: ${titleFontSize}px; 
       font-weight: 700; 
       color: #2c2418; 
       letter-spacing: 1.5px; 
@@ -278,7 +280,7 @@ export default function Timetable() {
       margin: 0;
     }
     .title p { 
-      font-size: 7px; 
+      font-size: 6px; 
       color: #8b7355; 
       letter-spacing: 0.25em; 
       margin-top: 2px; 
@@ -287,93 +289,93 @@ export default function Timetable() {
     }
     .week-info { text-align: right; }
     .week-number { 
-      font-size: 11px; 
+      font-size: 9px; 
       color: #c9a53b; 
       font-weight: 600; 
       font-family: 'Playfair Display', serif; 
     }
     .date-range { 
-      font-size: 8px; 
+      font-size: 7px; 
       color: #8b7355; 
       margin-top: 2px; 
       font-family: 'Inter', sans-serif; 
     }
     .user-name { 
-      font-size: 9px; 
+      font-size: 7px; 
       color: #5c4a32; 
-      margin-top: 4px; 
+      margin-top: 3px; 
       font-family: 'Inter', sans-serif; 
     }
     
     .manual-stats { 
       display: flex; 
-      gap: 20px; 
-      margin-bottom: 10px; 
-      padding: 8px 12px; 
+      gap: 15px; 
+      margin-bottom: 6px; 
+      padding: 5px 10px; 
       background: #f5f0ea; 
-      border-radius: 8px; 
+      border-radius: 6px; 
       border: 1px solid #d4c5b0; 
       flex-wrap: wrap; 
       justify-content: space-around; 
     }
     .manual-stat { text-align: center; }
     .manual-stat .label { 
-      font-size: 7px; 
+      font-size: 6px; 
       color: #8b7355; 
       text-transform: uppercase; 
       letter-spacing: 0.1em; 
-      margin-bottom: 4px; 
+      margin-bottom: 3px; 
       font-family: 'Inter', sans-serif; 
     }
     .manual-stat .blank-line { 
-      width: 60px; 
+      width: 50px; 
       border-bottom: 1px solid #d4c5b0; 
       margin: 0 auto; 
-      padding: 4px 0; 
+      padding: 3px 0; 
     }
     
     .quote-section { 
       background: #f5f0ea; 
       border-left: 3px solid #c9a53b; 
-      padding: 8px 12px; 
-      margin-bottom: 10px; 
-      border-radius: 8px; 
+      padding: 5px 10px; 
+      margin-bottom: 6px; 
+      border-radius: 6px; 
     }
     .quote-text { 
-      font-size: 10px; 
+      font-size: 8px; 
       font-style: italic; 
       color: #4a3720; 
       font-family: 'Playfair Display', serif; 
     }
     .quote-author { 
-      font-size: 7px; 
+      font-size: 6px; 
       color: #c9a53b; 
-      margin-top: 4px; 
+      margin-top: 3px; 
       font-family: 'Inter', sans-serif; 
       letter-spacing: 0.05em; 
     }
     
     .checklist-row { 
       display: flex; 
-      gap: 16px; 
-      margin-bottom: 10px; 
-      padding: 8px 12px; 
+      gap: 12px; 
+      margin-bottom: 6px; 
+      padding: 5px 10px; 
       background: #f5f0ea; 
-      border-radius: 8px; 
+      border-radius: 6px; 
       border: 1px solid #d4c5b0; 
       flex-wrap: wrap; 
     }
-    .checklist-day { display: flex; align-items: center; gap: 6px; }
+    .checklist-day { display: flex; align-items: center; gap: 4px; }
     .check-box { 
-      width: 12px; 
-      height: 12px; 
+      width: 10px; 
+      height: 10px; 
       border: 1.5px solid #c9a53b; 
       border-radius: 2px; 
       display: inline-block; 
       background: white; 
     }
     .checklist-day label { 
-      font-size: 8px; 
+      font-size: 7px; 
       font-weight: 500; 
       color: #5c4a32; 
       text-transform: uppercase; 
@@ -384,14 +386,14 @@ export default function Timetable() {
     table { 
       width: 100%; 
       border-collapse: collapse; 
-      margin-bottom: 10px; 
+      margin-bottom: 6px; 
     }
     th { 
       background: #e8e0d5; 
-      padding: 5px 3px; 
+      padding: 4px 2px; 
       border-bottom: 1px solid #d4c5b0; 
       font-weight: 600; 
-      font-size: 8px; 
+      font-size: 7px; 
       text-align: center; 
       color: #4a3720; 
       font-family: 'Playfair Display', serif; 
@@ -401,60 +403,61 @@ export default function Timetable() {
       border-right: 1px solid #e8e0d5; 
       border-bottom: 1px solid #f0ebe5; 
       vertical-align: top; 
-      padding: 3px; 
+      padding: 2px; 
     }
     td:last-child { border-right: none; }
     .time-col { 
-      width: 35px; 
+      width: 32px; 
       background: #faf8f5; 
       text-align: center; 
       vertical-align: middle; 
     }
     .time-text { 
       font-family: 'Playfair Display', serif; 
-      font-size: ${Math.max(6, baseFontSize - 1)}px; 
+      font-size: ${timeFontSize}px; 
       color: #8b7355; 
       font-weight: 500; 
     }
     .task-cell { 
       display: flex; 
       flex-direction: column; 
-      gap: 3px; 
+      gap: 2px; 
       min-height: ${rowHeight}px; 
     }
     .task-card { 
       border-left: 2px solid; 
-      border-radius: 4px; 
-      padding: 3px 5px; 
+      border-radius: 3px; 
+      padding: 2px 4px; 
       background: white; 
       border: 0.5px solid #e8e0d5; 
       border-left-width: 2px; 
     }
     .task-title { 
-      font-size: ${Math.max(7, baseFontSize)}px; 
+      font-size: ${taskTitleFontSize}px; 
       font-weight: 600; 
       color: #2c2418; 
       margin-bottom: 1px; 
       font-family: 'Playfair Display', serif; 
       letter-spacing: 0.02em; 
+      line-height: 1.2;
     }
     .task-time { 
       font-family: 'Inter', sans-serif; 
-      font-size: ${Math.max(5, baseFontSize - 1.5)}px; 
+      font-size: ${taskTimeFontSize}px; 
       color: #8b7355; 
-      margin-bottom: 2px; 
+      margin-bottom: 1px; 
     }
     
     .task-options { 
       display: flex; 
       flex-direction: column; 
-      gap: 2px; 
-      margin-top: 2px; 
+      gap: 1px; 
+      margin-top: 1px; 
     }
-    .option-row { display: flex; align-items: center; gap: 5px; }
+    .option-row { display: flex; align-items: center; gap: 3px; }
     .option-box { 
-      width: 9px; 
-      height: 9px; 
+      width: 7px; 
+      height: 7px; 
       border: 1px solid #c9a53b; 
       border-radius: 1px; 
       display: inline-block; 
@@ -462,70 +465,82 @@ export default function Timetable() {
       flex-shrink: 0; 
     }
     .option-label { 
-      font-size: ${Math.max(5, baseFontSize - 2)}px; 
+      font-size: ${optionFontSize}px; 
       color: #5c4a32; 
       font-family: 'Inter', sans-serif; 
     }
-    .reschedule-time { display: inline-flex; align-items: center; gap: 3px; margin-left: 5px; }
-    .reschedule-time .time-blank { width: 22px; border-bottom: 0.5px solid #d4c5b0; display: inline-block; }
+    .reschedule-time { display: inline-flex; align-items: center; gap: 2px; margin-left: 3px; }
+    .reschedule-time .time-blank { width: 18px; border-bottom: 0.5px solid #d4c5b0; display: inline-block; }
     
     .manual-scoring { 
-      margin-top: 8px; 
-      padding: 8px 12px; 
+      margin-top: 6px; 
+      padding: 5px 10px; 
       background: #f5f0ea; 
-      border-radius: 8px; 
+      border-radius: 6px; 
       border: 1px solid #d4c5b0; 
       display: grid; 
       grid-template-columns: repeat(3, 1fr); 
-      gap: 12px; 
+      gap: 10px; 
     }
     .score-item { text-align: center; }
     .score-item .label { 
-      font-size: 7px; 
+      font-size: 6px; 
       color: #8b7355; 
       text-transform: uppercase; 
       letter-spacing: 0.1em; 
-      margin-bottom: 4px; 
+      margin-bottom: 3px; 
       font-family: 'Inter', sans-serif; 
     }
     .score-item .blank-box { 
-      width: 70px; 
+      width: 60px; 
       margin: 0 auto; 
       border-bottom: 0.5px solid #d4c5b0; 
-      padding: 3px 0; 
+      padding: 2px 0; 
     }
-    .score-item .stars { display: flex; justify-content: center; gap: 6px; margin-top: 3px; }
-    .score-item .star { width: 10px; height: 10px; border: 0.5px solid #c9a53b; border-radius: 1px; background: white; }
+    .score-item .stars { display: flex; justify-content: center; gap: 4px; margin-top: 2px; }
+    .score-item .star { width: 8px; height: 8px; border: 0.5px solid #c9a53b; border-radius: 1px; background: white; }
     
     .notes-section { 
-      margin-top: 8px; 
-      padding: 8px 12px; 
+      margin-top: 6px; 
+      padding: 5px 10px; 
       background: #f5f0ea; 
-      border-radius: 8px; 
+      border-radius: 6px; 
       border: 1px solid #d4c5b0; 
     }
     .notes-title { 
-      font-size: 8px; 
+      font-size: 7px; 
       font-weight: 600; 
       color: #c9a53b; 
-      margin-bottom: 4px; 
+      margin-bottom: 3px; 
       text-transform: uppercase; 
       letter-spacing: 0.15em; 
       font-family: 'Inter', sans-serif; 
     }
-    .notes-lines { display: flex; flex-direction: column; gap: 5px; }
-    .note-line { border-bottom: 0.5px dashed #d4c5b0; padding-bottom: 4px; min-height: 18px; }
+    .notes-lines { display: flex; flex-direction: column; gap: 3px; }
+    .note-line { border-bottom: 0.5px dashed #d4c5b0; padding-bottom: 3px; min-height: 14px; }
     
     .footer { 
-      margin-top: 8px; 
+      margin-top: 6px; 
       display: flex; 
       justify-content: space-between; 
       align-items: center; 
-      padding-top: 5px; 
+      padding-top: 4px; 
       border-top: 0.5px solid #e8e0d5; 
-      font-size: 6px; 
+      font-size: 5.5px; 
       color: #8b7355; 
       font-family: 'Inter', sans-serif; 
+    }
+    
+    /* Ensure table doesn't break across pages badly */
+    tr {
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    thead {
+      display: table-header-group;
+    }
+    tfoot {
+      display: table-footer-group;
     }
   </style>
 </head>
@@ -571,7 +586,7 @@ export default function Timetable() {
     <thead>
       <tr>
         <th class="time-col">TIME</th>
-        ${DAYS.map(day => `<th>${day.slice(0, 3)}<br><span style="font-size:6px;font-weight:normal;">${getDayDate(day).toLocaleDateString()}</span></th>`).join('')}
+        ${DAYS.map(day => `<th>${day.slice(0, 3)}<br><span style="font-size:5.5px;font-weight:normal;">${getDayDate(day).toLocaleDateString()}</span></th>`).join('')}
       </tr>
     </thead>
     <tbody>
@@ -579,16 +594,14 @@ export default function Timetable() {
         <tr>
           <td class="time-col"><span class="time-text">${time}</span></td>
           ${DAYS.map(day => {
-            // Use the printTaskMap to get unique task for this day and time
-            const taskKey = `${day}-${time}`;
-            const task = printTaskMap.get(taskKey);
+            const task = taskMap.get(`${day}-${time}`);
             const taskColor = task ? (titleColor[task.title] || '#c9a53b') : '#d4c5b0';
             return `
               <td>
                 <div class="task-cell">
                   ${task ? `
                     <div class="task-card" style="border-left-color: ${taskColor};">
-                      <div class="task-title">${task.title.length > 20 ? task.title.substring(0, 18) + '..' : task.title}</div>
+                      <div class="task-title">${task.title.length > 18 ? task.title.substring(0, 16) + '..' : task.title}</div>
                       <div class="task-time">${task.startTime}–${task.endTime}</div>
                       <div class="task-options">
                         <div class="option-row">
@@ -605,12 +618,12 @@ export default function Timetable() {
                           <span class="reschedule-time"><span class="time-blank"></span> : <span class="time-blank"></span></span>
                         </div>
                       </div>
-                      ${task.notes ? `<div style="font-size:${Math.max(4.5, baseFontSize - 2)}px; color:#8b7355; margin-top:2px;">✒️ ${task.notes.substring(0, 30)}</div>` : ''}
+                      ${task.notes ? `<div style="font-size:${Math.max(4, optionFontSize - 0.5)}px; color:#8b7355; margin-top:1px;">✒️ ${task.notes.substring(0, 25)}</div>` : ''}
                     </div>
                   ` : `
-                    <div style="display:flex; align-items:center; justify-content:center; height:${rowHeight}px; opacity:0.3;">
+                    <div style="display:flex; align-items:center; justify-content:center; height:${rowHeight}px; opacity:0.25;">
                       <span class="option-box"></span>
-                      <span class="option-label" style="margin-left:5px;">Free slot</span>
+                      <span class="option-label" style="margin-left:3px;">Free</span>
                     </div>
                   `}
                 </div>
@@ -620,7 +633,7 @@ export default function Timetable() {
         </tr>
       `).join('')}
     </tbody>
-   </table>
+  </table>
 
   <div class="manual-scoring">
     <div class="score-item">
@@ -676,7 +689,7 @@ export default function Timetable() {
     </div>
   );
 
-  const dayTasks = uniqueTasks.filter(t => t.day === DAYS[selectedDay]);
+  const dayTasks = tasks.filter(t => t.day === DAYS[selectedDay]);
   const dayTimes = [...new Set(dayTasks.map(t => t.startTime))].sort();
 
   const WeekCell = ({ task }) => {
@@ -755,7 +768,7 @@ export default function Timetable() {
 
         <div className="bg-gray-50 rounded-xl border border-gray-200 p-3 flex items-center gap-3 flex-wrap">
           {[
-            { n: uniqueTasks.length, l: 'Total', c: 'text-gray-600' },
+            { n: tasks.length, l: 'Total', c: 'text-gray-600' },
             { n: completedCount, l: 'Done', c: 'text-emerald-600' },
             { n: missedCount, l: 'Missed', c: 'text-red-600' },
             { n: reschdCount, l: 'Moved', c: 'text-amber-600' },
@@ -784,7 +797,7 @@ export default function Timetable() {
           {DAYS.map((day, idx) => {
             const isSel = selectedDay === idx;
             const isToday = todayIdx === idx;
-            const dt = uniqueTasks.filter(t => t.day === day);
+            const dt = tasks.filter(t => t.day === day);
             const dp = dt.length ? Math.round(dt.filter(t => t.status === 'completed').length / dt.length * 100) : 0;
             return (
               <button key={day} onClick={() => { setSelectedDay(idx); setViewMode('day'); }}
@@ -817,7 +830,7 @@ export default function Timetable() {
               ))}
             </div>
             {allTimes.map(time => {
-              const tasksInRow = DAYS.map(d => uniqueTasks.filter(t => t.day === d && t.startTime === time));
+              const tasksInRow = DAYS.map(d => tasks.filter(t => t.day === d && t.startTime === time));
               const maxStack = Math.max(1, ...tasksInRow.map(a => a.length));
               return (
                 <div key={time} className="grid grid-cols-8 border-b border-gray-100 last:border-b-0" style={{ minHeight: `${Math.max(44, maxStack * 52)}px` }}>

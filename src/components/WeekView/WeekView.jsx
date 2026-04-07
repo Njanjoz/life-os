@@ -1,9 +1,10 @@
-// src/components/WeekView/WeekView.jsx - ONLY 3 FIXES (Keep everything else the same)
+// src/components/WeekView/WeekView.jsx - COMPLETE WORKING CODE (Popup z-index fixed)
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Calendar, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2, Check, Zap, Ban } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2 } from 'lucide-react';
+import TaskCell from '../TaskCell/TaskCell';
 import { TaskModal } from '../TaskModal/TaskModal';
 import { useRealTimeClock } from '../../hooks/useRealTimeClock';
-import { getCurrentWeek, getWeekTasks, addTask, updateWeekMetrics, checkMissedTasks, getTheme, updateTheme, getTimeSlots, updateTimeSlots, resetAllUserData, deleteAllTasksForWeek, updateTask } from '../../services/firebaseTaskService';
+import { getCurrentWeek, getWeekTasks, addTask, updateWeekMetrics, checkMissedTasks, getTheme, updateTheme, getTimeSlots, updateTimeSlots, resetAllUserData, deleteAllTasksForWeek } from '../../services/firebaseTaskService';
 import { useAuth } from '../../context/AuthContext';
 import { notifyUpcomingTask, notifyTaskOverdue, requestNotificationPermission } from '../../services/notificationService';
 
@@ -76,142 +77,6 @@ const runNotificationEngine = (tasks, notifiedSet) => {
   }
 };
 
-// Mobile Task Cell with FIXED POPUP (higher z-index)
-const MobileTaskCell = ({ task, onUpdate }) => {
-  const [showConfirm, setShowConfirm] = useState(false);
-  
-  const handleStatusToggle = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (task.status === 'completed') return;
-    setShowConfirm(true);
-  };
-  
-  const handleComplete = async () => {
-    await updateTask(task.id, { status: 'completed', completedAt: new Date() });
-    onUpdate();
-    setShowConfirm(false);
-  };
-  
-  const getStatusColor = () => {
-    if (task.status === 'completed') return 'border-green-500/50 bg-green-500/10';
-    if (task.status === 'missed') return 'border-red-500/50 bg-red-500/10';
-    if (task.status === 'active') return 'border-white/30 bg-white/10';
-    return 'border-white/20 bg-white/5';
-  };
-  
-  return (
-    <>
-      <button
-        onClick={handleStatusToggle}
-        className={`w-full h-14 rounded-lg border relative overflow-hidden text-left ${getStatusColor()}`}
-      >
-        <div className="relative z-10 p-1.5 h-full flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] font-medium truncate text-white max-w-[60px]">
-              {task.title?.slice(0, 8)}
-            </p>
-            <div className="flex items-center gap-0.5">
-              {task.status === 'completed' && <Check size={10} className="text-green-500" />}
-              {task.status === 'active' && <Zap size={10} className="text-white animate-pulse" />}
-              {task.status === 'missed' && <Ban size={10} className="text-red-500" />}
-            </div>
-          </div>
-          <div className="flex items-center justify-between mt-0.5">
-            <div className="flex items-center gap-0.5">
-              <Clock size={7} className="text-white/40" />
-              <span className="text-[8px] font-mono text-white/60">{task.startTime}</span>
-            </div>
-          </div>
-        </div>
-      </button>
-      
-      {/* FIX 1: Higher z-index for popup to appear above taskbar */}
-      {showConfirm && (
-        <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/90" onClick={() => setShowConfirm(false)}>
-          <div className="bg-black rounded-xl border border-white/20 p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <p className="text-sm text-white mb-4">Complete "{task.title}"?</p>
-            <div className="flex gap-3">
-              <button onClick={handleComplete} className="flex-1 py-2 rounded-lg bg-white text-black text-sm font-semibold">Complete</button>
-              <button onClick={() => setShowConfirm(false)} className="flex-1 py-2 rounded-lg bg-white/10 text-white text-sm font-semibold">Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-};
-
-// Desktop Task Cell - FIX 3: Make clickable
-const DesktopTaskCell = ({ task, onUpdate, theme }) => {
-  const [showConfirm, setShowConfirm] = useState(false);
-  
-  const getStatusColor = () => {
-    if (task.status === 'completed') return 'border-green-500/50 bg-green-500/20';
-    if (task.status === 'missed') return 'border-red-500/50 bg-red-500/20';
-    if (task.status === 'active') return 'border-purple-500/50 bg-purple-500/20';
-    return 'border-blue-500/50 bg-blue-500/10';
-  };
-  
-  const getStatusIcon = () => {
-    if (task.status === 'completed') return <Check size={10} className="text-green-500" />;
-    if (task.status === 'active') return <Zap size={10} className="text-purple-500 animate-pulse" />;
-    if (task.status === 'missed') return <Ban size={10} className="text-red-500" />;
-    return null;
-  };
-  
-  const handleClick = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (task.status === 'completed') return;
-    if (task.status === 'pending' || task.status === 'active') {
-      setShowConfirm(true);
-    }
-  };
-  
-  const handleComplete = async () => {
-    await updateTask(task.id, { status: 'completed', completedAt: new Date() });
-    onUpdate();
-    setShowConfirm(false);
-  };
-  
-  return (
-    <>
-      <button
-        onClick={handleClick}
-        className={`w-full h-14 rounded-lg border relative overflow-hidden text-left transition-all hover:brightness-110 cursor-pointer ${getStatusColor()}`}
-      >
-        <div className="relative z-10 p-1.5 h-full flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] font-medium truncate text-white max-w-[60px]">
-              {task.title?.slice(0, 8)}
-            </p>
-            {getStatusIcon()}
-          </div>
-          <div className="flex items-center justify-between mt-0.5">
-            <div className="flex items-center gap-0.5">
-              <Clock size={7} className="text-slate-400" />
-              <span className="text-[8px] font-mono text-slate-300">{task.startTime}</span>
-            </div>
-          </div>
-        </div>
-      </button>
-      
-      {showConfirm && (
-        <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/80" onClick={() => setShowConfirm(false)}>
-          <div className="bg-slate-900 rounded-xl border border-white/20 p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <p className="text-sm text-white mb-4">Complete "{task.title}"?</p>
-            <div className="flex gap-3">
-              <button onClick={handleComplete} className="flex-1 py-2 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700">Complete</button>
-              <button onClick={() => setShowConfirm(false)} className="flex-1 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold hover:bg-slate-600">Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-};
-
 export default function WeekView() {
   const { user } = useAuth();
   
@@ -248,17 +113,21 @@ export default function WeekView() {
   const [sortOrder, setSortOrder] = useState('asc');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [isSorting, setIsSorting] = useState(false);
   const [seconds, setSeconds] = useState(() => new Date().getSeconds());
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  
   const isLoadingRef = useRef(false);
   const notifiedTasksRef = useRef(new Set());
   const notificationIntervalRef = useRef(null);
   const tasksRef = useRef([]);
+  const sortTimeoutRef = useRef(null);
   const secondsIntervalRef = useRef(null);
   const filterButtonRef = useRef(null);
   const isMountedRef = useRef(true);
   const lastSelectedDateKeyRef = useRef(null);
+  const loadWeekRef = useRef(null);
+  
+  const sortedCacheRef = useRef({});
   
   useEffect(() => {
     tasksRef.current = tasks;
@@ -270,6 +139,7 @@ export default function WeekView() {
       isMountedRef.current = false;
       if (notificationIntervalRef.current) clearInterval(notificationIntervalRef.current);
       if (secondsIntervalRef.current) clearInterval(secondsIntervalRef.current);
+      if (sortTimeoutRef.current) clearTimeout(sortTimeoutRef.current);
     };
   }, []);
   
@@ -295,6 +165,7 @@ export default function WeekView() {
   
   const loadWeek = useCallback(async () => {
     if (isLoadingRef.current || !user || !isMountedRef.current) return;
+    
     isLoadingRef.current = true;
     setLoading(true);
     
@@ -311,7 +182,11 @@ export default function WeekView() {
         .map(t => {
           const [startHour, startMin] = t.startTime.split(':').map(Number);
           const [endHour, endMin] = t.endTime.split(':').map(Number);
-          return { ...t, startMinutes: startHour * 60 + startMin, endMinutes: endHour * 60 + endMin };
+          return {
+            ...t,
+            startMinutes: startHour * 60 + startMin,
+            endMinutes: endHour * 60 + endMin
+          };
         });
       
       setTasks(activeTasks);
@@ -325,7 +200,7 @@ export default function WeekView() {
       const allSlots = taskTimes.length > 0 ? taskTimes : savedTimeSlots;
       if (isMountedRef.current) setTimeSlots(allSlots);
       
-      try { await checkMissedTasks(currentWeek.id, selectedDate); } catch (e) { console.warn(e); }
+      try { await checkMissedTasks(currentWeek.id, selectedDate); } catch (missedError) { console.warn(missedError); }
       
       const updatedMetrics = await updateWeekMetrics(currentWeek.id);
       if (updatedMetrics && isMountedRef.current) setMetrics(updatedMetrics);
@@ -339,21 +214,25 @@ export default function WeekView() {
       }
     }
   }, [user, selectedDate]);
-  
+
+  useEffect(() => {
+    loadWeekRef.current = loadWeek;
+  }, [loadWeek]);
+
   useEffect(() => {
     if (!user) return;
     const currentDateKey = selectedDate.toDateString();
     if (lastSelectedDateKeyRef.current !== currentDateKey) {
       lastSelectedDateKeyRef.current = currentDateKey;
-      loadWeek();
+      loadWeekRef.current();
     }
-  }, [user, selectedDate, refreshTrigger, loadWeek]);
-  
+  }, [user, selectedDate]);
+
   useEffect(() => {
     setVisibleSlotCount(WINDOW_SIZE);
     setExpandedSections({ dayView: false, weekView: false });
   }, [selectedDay, viewMode, WINDOW_SIZE]);
-  
+
   useEffect(() => {
     if (!user) return;
     requestNotificationPermission().catch(console.warn);
@@ -364,12 +243,21 @@ export default function WeekView() {
     }, 60000);
     return () => { if (notificationIntervalRef.current) clearInterval(notificationIntervalRef.current); };
   }, [user]);
-  
-  const handleRefresh = useCallback(() => {
+
+  const handleRefresh = useCallback(async () => { 
+    setRefreshKey(prev => prev + 1);
     notifiedTasksRef.current.clear();
-    setRefreshTrigger(prev => prev + 1);
-  }, []);
-  
+    setVisibleSlotCount(WINDOW_SIZE);
+    setExpandedSections({ dayView: false, weekView: false });
+    sortedCacheRef.current = {};
+    const currentDateKey = selectedDate.toDateString();
+    lastSelectedDateKeyRef.current = null;
+    setTimeout(() => {
+      lastSelectedDateKeyRef.current = currentDateKey;
+      loadWeekRef.current();
+    }, 0);
+  }, [WINDOW_SIZE, selectedDate]);
+
   const changeWeek = useCallback((direction) => {
     const newDate = normalizeDate(new Date(selectedDate));
     newDate.setDate(selectedDate.getDate() + (direction * 7));
@@ -377,8 +265,9 @@ export default function WeekView() {
     notifiedTasksRef.current.clear();
     setVisibleSlotCount(WINDOW_SIZE);
     setExpandedSections({ dayView: false, weekView: false });
+    sortedCacheRef.current = {};
   }, [selectedDate, WINDOW_SIZE]);
-  
+
   const getDayDate = useCallback((dayName) => {
     const startOfWeek = normalizeDate(selectedDate);
     const day = startOfWeek.getDay();
@@ -389,7 +278,7 @@ export default function WeekView() {
     targetDate.setDate(startOfWeek.getDate() + dayIndex);
     return normalizeDate(targetDate);
   }, [selectedDate]);
-  
+
   const formatDateRange = useCallback(() => {
     const startOfWeek = normalizeDate(selectedDate);
     const day = startOfWeek.getDay();
@@ -399,147 +288,216 @@ export default function WeekView() {
     endOfWeek.setDate(startOfWeek.getDate() + 6);
     return `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
   }, [selectedDate]);
+
+  const getCurrentTimePosition = useCallback(() => {
+    const currentTime = getClockPosition();
+    const slotIndex = timeSlots.findIndex(slot => slot >= currentTime.timeString);
+    if (slotIndex === -1) return null;
+    return { slotIndex, timeString: currentTime.timeString };
+  }, [getClockPosition, timeSlots]);
+
+  const currentPos = getCurrentTimePosition();
+  
+  const processed = useMemo(() => {
+    const map = {};
+    const byDay = {};
+    for (let i = 0; i < tasks.length; i++) {
+      const t = tasks[i];
+      map[`${t.day}-${t.startTime}`] = t;
+      if (!byDay[t.day]) byDay[t.day] = [];
+      byDay[t.day].push(t);
+    }
+    return { map, byDay };
+  }, [tasks]);
+  
+  const taskMap = processed.map;
+  const tasksByDay = processed.byDay;
   
   const getTaskAtSlot = useCallback((day, time) => {
-    return tasks.find(t => t.day === day && t.startTime === time);
-  }, [tasks]);
+    return taskMap[`${day}-${time}`];
+  }, [taskMap]);
   
-  const tasksByDay = useMemo(() => {
-    const byDay = {};
-    DAYS.forEach(day => { byDay[day] = tasks.filter(t => t.day === day); });
-    return byDay;
-  }, [tasks]);
+  const currentDayTasks = tasksByDay[DAYS[selectedDay]] || [];
   
   const currentDayTimes = useMemo(() => {
-    const times = [...new Set(tasksByDay[DAYS[selectedDay]]?.map(t => t.startTime) || [])].sort();
-    return times;
-  }, [tasksByDay, selectedDay]);
-  
-  const sortedDayTimes = useMemo(() => {
-    return sortOrder === 'asc' ? [...currentDayTimes].sort() : [...currentDayTimes].sort().reverse();
-  }, [currentDayTimes, sortOrder]);
-  
-  const sortedWeekTimes = useMemo(() => {
-    return sortOrder === 'asc' ? [...timeSlots].sort() : [...timeSlots].sort().reverse();
-  }, [timeSlots, sortOrder]);
-  
+    const times = [];
+    for (let i = 0; i < currentDayTasks.length; i++) {
+      times.push(currentDayTasks[i].startTime);
+    }
+    return [...new Set(times)].sort();
+  }, [currentDayTasks]);
+
+  const getSortedTimeSlots = useCallback((slots, order) => {
+    const cacheKey = `${slots.join(',')}_${order}`;
+    if (sortedCacheRef.current[cacheKey]) return sortedCacheRef.current[cacheKey];
+    const result = order === 'asc' ? [...slots].sort() : [...slots].sort().reverse();
+    sortedCacheRef.current[cacheKey] = result;
+    if (Object.keys(sortedCacheRef.current).length > 50) sortedCacheRef.current = {};
+    return result;
+  }, []);
+
+  const sortedDayTimes = useMemo(() => getSortedTimeSlots(currentDayTimes, sortOrder), [getSortedTimeSlots, currentDayTimes, sortOrder]);
+  const sortedWeekTimes = useMemo(() => getSortedTimeSlots(timeSlots, sortOrder), [getSortedTimeSlots, timeSlots, sortOrder]);
+
+  const getCurrentTimeSlotIndex = useCallback(() => {
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+    for (let i = 0; i < sortedDayTimes.length; i++) {
+      const [hour, minute] = sortedDayTimes[i].split(':').map(Number);
+      if (hour * 60 + minute >= currentTime) return i;
+    }
+    return -1;
+  }, [now, sortedDayTimes]);
+
+  const currentSlotIndex = getCurrentTimeSlotIndex();
+  const startIndex = Math.max(0, currentSlotIndex - 1);
+
   const visibleDaySlots = useMemo(() => {
     if (expandedSections['dayView'] || visibleSlotCount > WINDOW_SIZE) {
       return sortedDayTimes.slice(0, visibleSlotCount);
     }
-    return sortedDayTimes.slice(0, WINDOW_SIZE);
-  }, [expandedSections, sortedDayTimes, visibleSlotCount, WINDOW_SIZE]);
-  
+    return sortedDayTimes.slice(startIndex, startIndex + WINDOW_SIZE);
+  }, [expandedSections, sortedDayTimes, startIndex, visibleSlotCount, WINDOW_SIZE]);
+
   const visibleWeekSlots = useMemo(() => {
     if (expandedSections['weekView'] || visibleSlotCount > WINDOW_SIZE) {
       return sortedWeekTimes.slice(0, visibleSlotCount);
     }
     return sortedWeekTimes.slice(0, WINDOW_SIZE);
   }, [expandedSections, sortedWeekTimes, visibleSlotCount, WINDOW_SIZE]);
-  
+
   const hasMoreSlots = sortedDayTimes.length > visibleSlotCount;
   const hasMoreWeekSlots = sortedWeekTimes.length > visibleSlotCount;
-  
-  const toggleSortOrder = () => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-  const loadMoreSlots = () => {
+
+  const toggleSortOrder = useCallback(() => {
+    if (isSorting) return;
+    setIsSorting(true);
+    if (sortTimeoutRef.current) clearTimeout(sortTimeoutRef.current);
+    sortTimeoutRef.current = setTimeout(() => {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+      setTimeout(() => setIsSorting(false), 200);
+    }, 100);
+  }, [isSorting]);
+
+  const loadMoreSlots = useCallback(() => {
     const maxLength = viewMode === 'day' ? sortedDayTimes.length : sortedWeekTimes.length;
     setVisibleSlotCount(prev => Math.min(prev + LOAD_MORE_STEP, maxLength));
     setExpandedSections(prev => ({ ...prev, [viewMode === 'day' ? 'dayView' : 'weekView']: true }));
-  };
-  const loadAllSlots = () => {
+  }, [sortedDayTimes.length, sortedWeekTimes.length, viewMode, LOAD_MORE_STEP]);
+
+  const loadAllSlots = useCallback(() => {
     const maxLength = viewMode === 'day' ? sortedDayTimes.length : sortedWeekTimes.length;
     setVisibleSlotCount(maxLength);
     setExpandedSections(prev => ({ ...prev, [viewMode === 'day' ? 'dayView' : 'weekView']: true }));
-  };
-  const showLessSlots = () => {
+  }, [sortedDayTimes.length, sortedWeekTimes.length, viewMode]);
+
+  const showLessSlots = useCallback(() => {
     setVisibleSlotCount(WINDOW_SIZE);
     setExpandedSections({ dayView: false, weekView: false });
-  };
-  const expandAll = () => setExpandedSections({ dayView: true, weekView: true });
-  const collapseAll = () => setExpandedSections({ dayView: false, weekView: false });
-  
+  }, [WINDOW_SIZE]);
+
+  const expandAll = useCallback(() => {
+    setExpandedSections({ dayView: true, weekView: true });
+    setVisibleSlotCount(WINDOW_SIZE);
+  }, [WINDOW_SIZE]);
+
+  const collapseAll = useCallback(() => {
+    setExpandedSections({ dayView: false, weekView: false });
+    setVisibleSlotCount(WINDOW_SIZE);
+  }, [WINDOW_SIZE]);
+
   const isTaskDateTimeInPast = useCallback((dayName, timeStr, dayDate) => {
     const taskDate = new Date(dayDate);
     const [hour, minute] = timeStr.split(':').map(Number);
     taskDate.setHours(hour, minute, 0, 0);
-    return taskDate.getTime() < getNormalizedNow().getTime();
+    const now = getNormalizedNow();
+    return taskDate.getTime() < now.getTime();
   }, []);
-  
+
   const handleSlotClick = useCallback((day, time, dayDate) => {
+    const currentRealDate = getCurrentRealDate();
     const taskDateNormalized = normalizeDate(dayDate);
-    if (taskDateNormalized < getCurrentRealDate()) return;
+    if (taskDateNormalized < currentRealDate) return;
+    if (taskDateNormalized.getTime() === currentRealDate.getTime() && isTaskDateTimeInPast(day, time, dayDate)) return;
     if (getTaskAtSlot(day, time)) return;
     setSelectedSlot({ day, time });
     setShowSlotModal(true);
-  }, [getTaskAtSlot]);
-  
+  }, [isTaskDateTimeInPast, getTaskAtSlot]);
+
   const handleAddTaskToSlot = async (taskData) => {
     if (!week || !selectedSlot) return;
-    await addTask(week.id, {
-      title: taskData.title,
-      category: taskData.category,
-      subcategory: taskData.subcategory,
-      day: selectedSlot.day,
-      startTime: selectedSlot.time,
-      endTime: taskData.endTime || `${parseInt(selectedSlot.time.split(':')[0]) + 1}:00`
+    const taskDate = getDayDate(selectedSlot.day);
+    const currentRealDate = getCurrentRealDate();
+    if (taskDate < currentRealDate) { setShowSlotModal(false); setSelectedSlot(null); return; }
+    await addTask(week.id, { 
+      title: taskData.title, 
+      category: taskData.category, 
+      subcategory: taskData.subcategory, 
+      day: selectedSlot.day, 
+      startTime: selectedSlot.time, 
+      endTime: taskData.endTime || `${parseInt(selectedSlot.time.split(':')[0]) + 1}:00` 
     });
-    handleRefresh();
+    await handleRefresh();
     setShowSlotModal(false);
     setSelectedSlot(null);
   };
-  
+
   const handleAddTask = async (taskData) => {
     if (!week) return;
-    await addTask(week.id, {
-      title: taskData.title,
-      category: taskData.category,
-      subcategory: taskData.subcategory,
-      day: taskData.day,
-      startTime: taskData.startTime,
-      endTime: taskData.endTime
+    const taskDate = getDayDate(taskData.day);
+    const currentRealDate = getCurrentRealDate();
+    if (taskDate < currentRealDate) return;
+    await addTask(week.id, { 
+      title: taskData.title, 
+      category: taskData.category, 
+      subcategory: taskData.subcategory, 
+      day: taskData.day, 
+      startTime: taskData.startTime, 
+      endTime: taskData.endTime 
     });
-    handleRefresh();
+    await handleRefresh();
     setShowAddModal(false);
   };
-  
+
   const handleThemeUpdate = async (newTheme) => { await updateTheme(newTheme); setTheme(newTheme); };
-  
+
   const handleAddTimeSlot = async () => {
     if (newTimeSlot && !timeSlots.includes(newTimeSlot)) {
       const updatedSlots = [...timeSlots, newTimeSlot].sort();
       await updateTimeSlots(updatedSlots);
       setTimeSlots(updatedSlots);
       setNewTimeSlot('12:00');
-      handleRefresh();
+      await handleRefresh();
+      sortedCacheRef.current = {};
     }
   };
-  
+
   const handleRemoveTimeSlot = async (slot) => {
     const updatedSlots = timeSlots.filter(s => s !== slot);
     await updateTimeSlots(updatedSlots);
     setTimeSlots(updatedSlots);
-    handleRefresh();
+    await handleRefresh();
+    sortedCacheRef.current = {};
   };
-  
+
   const handleResetWeek = async () => {
-    if (window.confirm('⚠️ Delete ALL tasks for this week? This cannot be undone.')) {
+    if (confirm('⚠️ WARNING: This will delete ALL tasks for the current week only.\n\nThis action cannot be undone.\n\nAre you sure?')) {
       setResetting(true);
       try {
         if (week) await deleteAllTasksForWeek(week.id);
-        handleRefresh();
+        await handleRefresh();
       } catch (error) { console.error(error); alert('Failed to reset week.'); }
       finally { setResetting(false); setShowFilterMenu(false); }
     }
   };
-  
+
   const handleResetAll = async () => {
-    if (window.confirm('⚠️ COMPLETE DATA RESET - This will delete EVERYTHING. Cannot be undone.')) {
+    if (confirm('⚠️⚠️⚠️ COMPLETE DATA RESET ⚠️⚠️⚠️\n\nThis will DELETE ALL your tasks, schedules, and analytics.\n\nThis action CANNOT be undone!\n\nAre you ABSOLUTELY sure?')) {
       setResetting(true);
       try { await resetAllUserData(); window.location.reload(); } 
       catch (error) { console.error(error); alert('Failed to reset data.'); setResetting(false); }
     }
   };
-  
+
   if (loading && tasks.length === 0 && !resetting) {
     return (
       <div className="flex justify-center items-center h-96 w-full bg-slate-900">
@@ -548,17 +506,16 @@ export default function WeekView() {
       </div>
     );
   }
-  
+
   // ================================================================
-  // MOBILE B&W LITE RENDER - FIX 2: Added proper scrolling
+  // MOBILE B&W LITE RENDER - WITH FULL TaskCell (Popup fixed with high z-index)
   // ================================================================
   if (isMobileDevice) {
     return (
-      // FIX 2: Changed to allow scrolling
       <div className="w-full h-screen bg-black overflow-y-auto">
         <div className="p-3 space-y-3 pb-32">
           
-          {/* Top Bar - KEPT EXACTLY THE SAME */}
+          {/* Top Bar */}
           <div className="bg-black rounded-xl p-3 border border-white/10 sticky top-0 z-20">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
@@ -586,8 +543,8 @@ export default function WeekView() {
                   {showFilterMenu && (
                     <div className="absolute right-0 top-full mt-2 bg-black rounded-lg border border-white/20 shadow-xl z-[100] min-w-[200px]">
                       <div className="py-1">
-                        <button onClick={toggleSortOrder} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
-                          <ArrowUpDown size={12} /> Sort: {sortOrder === 'asc' ? 'Earliest First' : 'Latest First'}
+                        <button onClick={toggleSortOrder} disabled={isSorting} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2 disabled:opacity-50">
+                          {isSorting ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Sorting...</> : <><ArrowUpDown size={12} /> Sort: {sortOrder === 'asc' ? 'Earliest First' : 'Latest First'}</>}
                         </button>
                         <button onClick={expandAll} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
                           <ChevronDown size={12} /> Expand All
@@ -615,22 +572,10 @@ export default function WeekView() {
           
           {/* Stats */}
           <div className="grid grid-cols-4 gap-1.5">
-            <div className="bg-white/5 border border-white/10 rounded-lg p-1.5 text-center">
-              <p className="text-[8px] text-white/40">Score</p>
-              <p className="text-sm font-bold text-white">{metrics.weeklyScore || 0}</p>
-            </div>
-            <div className="bg-white/5 border border-white/10 rounded-lg p-1.5 text-center">
-              <p className="text-[8px] text-white/40">Complete</p>
-              <p className="text-sm font-bold text-white">{metrics.completionRate || 0}%</p>
-            </div>
-            <div className="bg-white/5 border border-white/10 rounded-lg p-1.5 text-center">
-              <p className="text-[8px] text-white/40">Discipline</p>
-              <p className="text-sm font-bold text-white">{metrics.disciplineScore || 0}</p>
-            </div>
-            <div className="bg-white/5 border border-white/10 rounded-lg p-1.5 text-center">
-              <p className="text-[8px] text-white/40">Delay</p>
-              <p className="text-sm font-bold text-orange-400">{metrics.avgDelay || 0}m</p>
-            </div>
+            <div className="bg-white/5 border border-white/10 rounded-lg p-1.5 text-center"><p className="text-[8px] text-white/40">Score</p><p className="text-sm font-bold text-white">{metrics.weeklyScore || 0}</p></div>
+            <div className="bg-white/5 border border-white/10 rounded-lg p-1.5 text-center"><p className="text-[8px] text-white/40">Complete</p><p className="text-sm font-bold text-white">{metrics.completionRate || 0}%</p></div>
+            <div className="bg-white/5 border border-white/10 rounded-lg p-1.5 text-center"><p className="text-[8px] text-white/40">Discipline</p><p className="text-sm font-bold text-white">{metrics.disciplineScore || 0}</p></div>
+            <div className="bg-white/5 border border-white/10 rounded-lg p-1.5 text-center"><p className="text-[8px] text-white/40">Delay</p><p className="text-sm font-bold text-orange-400">{metrics.avgDelay || 0}m</p></div>
           </div>
           
           {/* Week Nav */}
@@ -670,7 +615,7 @@ export default function WeekView() {
             </div>
           )}
           
-          {/* Time Grid - KEPT EXACTLY THE SAME */}
+          {/* Time Grid - USING FULL TaskCell with isMobile={true} */}
           <div className="bg-black border border-white/20 rounded-xl overflow-hidden w-full">
             <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-white/5 sticky top-0 z-10`}>
               <div className="p-2 text-center text-[9px] font-bold text-white/60 uppercase border-r border-white/10">Time</div>
@@ -700,7 +645,18 @@ export default function WeekView() {
                       </div>
                       <div className="p-0.5 w-full bg-black">
                         {task ? (
-                          <MobileTaskCell task={task} onUpdate={handleRefresh} />
+                          <TaskCell 
+                            key={task.id}
+                            task={task} 
+                            weekId={week?.id} 
+                            now={now} 
+                            selectedDate={date} 
+                            onUpdate={handleRefresh} 
+                            theme={theme} 
+                            isPast={isPast} 
+                            viewMode={viewMode}
+                            isMobile={true}
+                          />
                         ) : canAdd ? (
                           <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
                             <Plus size={14} className="text-white/40" />
@@ -739,7 +695,18 @@ export default function WeekView() {
                       return (
                         <div key={`${day}-${time}`} className={`p-0.5 w-full bg-black ${isPast ? 'opacity-50' : ''}`}>
                           {task ? (
-                            <MobileTaskCell task={task} onUpdate={handleRefresh} />
+                            <TaskCell 
+                              key={task.id}
+                              task={task} 
+                              weekId={week?.id} 
+                              now={now} 
+                              selectedDate={date} 
+                              onUpdate={handleRefresh} 
+                              theme={theme} 
+                              isPast={isPast} 
+                              viewMode={viewMode}
+                              isMobile={true}
+                            />
                           ) : canAdd ? (
                             <div onClick={() => handleSlotClick(day, time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
                               <Plus size={12} className="text-white/40" />
@@ -781,7 +748,7 @@ export default function WeekView() {
           <TaskModal isOpen={showSlotModal} onClose={() => { setShowSlotModal(false); setSelectedSlot(null); }} day={selectedSlot?.day} time={selectedSlot?.time} onSave={handleAddTaskToSlot} theme={theme} weekStartDate={getWeekStart(selectedDate)} isMobile={true} />
           
           {showThemeModal && (
-            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[999999]">
               <div className="bg-black rounded-xl p-4 w-80 border border-white/20">
                 <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Theme</h3><button onClick={() => setShowThemeModal(false)}><X size={14} className="text-white/60" /></button></div>
                 <div className="space-y-2">
@@ -793,7 +760,7 @@ export default function WeekView() {
           )}
           
           {showTimeSlotModal && (
-            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[999999]">
               <div className="bg-black rounded-xl p-4 w-80 border border-white/20">
                 <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Time Slots</h3><button onClick={() => setShowTimeSlotModal(false)}><X size={14} className="text-white/60" /></button></div>
                 <div className="flex gap-2 mb-3"><input type="time" value={newTimeSlot} onChange={e => setNewTimeSlot(e.target.value)} className="flex-1 p-1.5 text-xs rounded bg-white/10 border border-white/20 text-white" /><button onClick={handleAddTimeSlot} className="px-3 py-1.5 rounded text-xs bg-white text-black">Add</button></div>
@@ -812,15 +779,15 @@ export default function WeekView() {
       </div>
     );
   }
-  
+
   // ================================================================
-  // DESKTOP RENDER - FIX 3: Made cells clickable
+  // DESKTOP RENDER - FULL ORIGINAL STYLES WITH TaskCell
   // ================================================================
   return (
     <div className="w-full max-w-full overflow-x-auto pb-20 relative">
       <div className="min-w-[320px] space-y-3 p-4">
         
-        {/* Desktop Top Bar - KEPT EXACTLY THE SAME */}
+        {/* Desktop Top Bar */}
         <div className="bg-slate-900/80 rounded-xl p-3 border border-white/10 sticky top-0 z-20 backdrop-blur-sm">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
@@ -831,8 +798,8 @@ export default function WeekView() {
               </div>
             </div>
             <div className="flex gap-1">
-              <button onClick={() => changeWeek(-1)} className="p-1.5 hover:bg-white/10 rounded-lg text-white"><ChevronLeft size={14} /></button>
-              <button onClick={() => changeWeek(1)} className="p-1.5 hover:bg-white/10 rounded-lg text-white"><ChevronRight size={14} /></button>
+              <button onClick={() => changeWeek(-1)} className="p-1.5 hover:bg-white/10 rounded-lg"><ChevronLeft size={14} /></button>
+              <button onClick={() => changeWeek(1)} className="p-1.5 hover:bg-white/10 rounded-lg"><ChevronRight size={14} /></button>
             </div>
             <div className="flex gap-1">
               <button onClick={() => setViewMode('day')} className={`p-1.5 rounded-lg transition ${viewMode === 'day' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
@@ -848,8 +815,8 @@ export default function WeekView() {
                 {showFilterMenu && (
                   <div className="absolute right-0 top-full mt-2 bg-slate-800 rounded-lg border border-white/10 shadow-xl z-[100] min-w-[200px]">
                     <div className="py-1">
-                      <button onClick={toggleSortOrder} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
-                        <ArrowUpDown size={12} /> Sort: {sortOrder === 'asc' ? 'Earliest First' : 'Latest First'}
+                      <button onClick={toggleSortOrder} disabled={isSorting} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2 disabled:opacity-50">
+                        {isSorting ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> Sorting...</> : <><ArrowUpDown size={12} /> Sort: {sortOrder === 'asc' ? 'Earliest First' : 'Latest First'}</>}
                       </button>
                       <button onClick={expandAll} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
                         <ChevronDown size={12} /> Expand All
@@ -920,7 +887,7 @@ export default function WeekView() {
           </div>
         )}
         
-        {/* Desktop Time Grid - USING CLICKABLE DesktopTaskCell */}
+        {/* Desktop Time Grid - USING FULL TaskCell with isMobile={false} */}
         <div className="bg-slate-900/60 border border-white/10 rounded-xl overflow-hidden w-full backdrop-blur-sm">
           <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-slate-900/40`}>
             <div className="p-2 text-center text-[10px] font-bold text-slate-500 uppercase border-r border-white/10">Time</div>
@@ -950,7 +917,18 @@ export default function WeekView() {
                     </div>
                     <div className="p-1">
                       {task ? (
-                        <DesktopTaskCell task={task} onUpdate={handleRefresh} theme={theme} />
+                        <TaskCell 
+                          key={task.id}
+                          task={task} 
+                          weekId={week?.id} 
+                          now={now} 
+                          selectedDate={date} 
+                          onUpdate={handleRefresh} 
+                          theme={theme} 
+                          isPast={isPast} 
+                          viewMode={viewMode}
+                          isMobile={false}
+                        />
                       ) : canAdd ? (
                         <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-slate-800/50 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
                           <Plus size={16} className="text-slate-500" />
@@ -1002,9 +980,20 @@ export default function WeekView() {
                       return (
                         <div key={`${day}-${time}`} className={`p-1 ${isPast ? 'opacity-50' : ''}`}>
                           {task ? (
-                            <DesktopTaskCell task={task} onUpdate={handleRefresh} theme={theme} />
+                            <TaskCell 
+                              key={task.id}
+                              task={task} 
+                              weekId={week?.id} 
+                              now={now} 
+                              selectedDate={date} 
+                              onUpdate={handleRefresh} 
+                              theme={theme} 
+                              isPast={isPast} 
+                              viewMode={viewMode}
+                              isMobile={false}
+                            />
                           ) : canAdd ? (
-                            <div onClick={() => canAdd && !task && handleSlotClick(day, time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-slate-800/50 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
+                            <div onClick={() => handleSlotClick(day, time, date)} className="h-14 rounded-lg border border-dashed border-white/20 bg-slate-800/50 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
                               <Plus size={14} className="text-slate-500" />
                             </div>
                           ) : (
@@ -1053,7 +1042,7 @@ export default function WeekView() {
         <TaskModal isOpen={showSlotModal} onClose={() => { setShowSlotModal(false); setSelectedSlot(null); }} day={selectedSlot?.day} time={selectedSlot?.time} onSave={handleAddTaskToSlot} theme={theme} weekStartDate={getWeekStart(selectedDate)} isMobile={false} />
         
         {showThemeModal && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[999999]">
             <div className="bg-slate-900 rounded-xl p-5 w-96 shadow-2xl">
               <div className="flex justify-between mb-4"><h3 className="text-base font-bold text-white">Customize Theme</h3><button onClick={() => setShowThemeModal(false)} className="text-slate-400 hover:text-white"><X size={18} /></button></div>
               <div className="space-y-3">
@@ -1065,7 +1054,7 @@ export default function WeekView() {
         )}
         
         {showTimeSlotModal && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[999999]">
             <div className="bg-slate-900 rounded-xl p-5 w-96 shadow-2xl">
               <div className="flex justify-between mb-4"><h3 className="text-base font-bold text-white">Manage Time Slots</h3><button onClick={() => setShowTimeSlotModal(false)} className="text-slate-400 hover:text-white"><X size={18} /></button></div>
               <div className="flex gap-2 mb-4"><input type="time" value={newTimeSlot} onChange={e => setNewTimeSlot(e.target.value)} className="flex-1 p-2 text-sm rounded-lg bg-slate-800 border border-white/10 text-white" /><button onClick={handleAddTimeSlot} className="px-4 py-2 rounded-lg text-sm bg-purple-600 text-white hover:bg-purple-700 transition">Add</button></div>

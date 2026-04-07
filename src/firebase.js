@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, orderBy, Timestamp, writeBatch, enableIndexedDbPersistence } from "firebase/firestore";
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, orderBy, Timestamp, writeBatch } from "firebase/firestore";
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 
 const firebaseConfig = {
@@ -14,25 +14,34 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
-const googleProvider = new GoogleAuthProvider();
 
-// Enable persistence for better offline support
-setPersistence(auth, browserLocalPersistence).catch(console.error);
+// Detect mobile Chrome/Brave
+const isMobileChrome = () => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  const isChrome = /Chrome/.test(ua) && !/Edg/.test(ua);
+  const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(ua);
+  return isChrome && isMobile;
+};
+
+// Initialize Firestore - SIMPLE is better
+// Don't use enableIndexedDbPersistence on mobile Chrome
+const db = getFirestore(app);
+
+// Initialize Auth - SIMPLE is better
+const auth = getAuth(app);
+
+// Set persistence to localStorage only (works on all browsers)
+// Do this ONCE, not multiple times
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.error("Failed to set auth persistence:", err);
+});
+
+const googleProvider = new GoogleAuthProvider();
 
 // Configure Google Provider
 googleProvider.setCustomParameters({
   prompt: 'select_account'
-});
-
-// Enable offline persistence for Firestore
-enableIndexedDbPersistence(db).catch((err) => {
-  if (err.code === 'failed-precondition') {
-    console.warn('Multiple tabs open, persistence can only be enabled in one tab at a time.');
-  } else if (err.code === 'unimplemented') {
-    console.warn('The current browser does not support persistence.');
-  }
 });
 
 // Detect if running in Capacitor
@@ -47,5 +56,6 @@ export {
   collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, 
   query, where, orderBy, Timestamp, writeBatch,
   googleProvider,
-  isCapacitor
+  isCapacitor,
+  isMobileChrome
 };

@@ -1,6 +1,6 @@
-// src/components/WeekView/WeekView.jsx - FULLY OPTIMIZED - WITH DAY LOCKING
+// src/components/WeekView/WeekView.jsx - WITH PAST DAY COLUMNS BLURRED & SECONDS COUNTER
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2, Printer } from 'lucide-react';
+import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2 } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
 import { TaskModal } from '../TaskModal/TaskModal';
 import { useRealTimeClock } from '../../hooks/useRealTimeClock';
@@ -15,6 +15,52 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 const WINDOW_SIZE = isMobile ? 2 : 3;
 const LOAD_MORE_STEP = isMobile ? 2 : 3;
+
+// Helper: Normalize date to start of day (remove time component)
+const normalizeDate = (date) => {
+  const normalized = new Date(date);
+  normalized.setHours(0, 0, 0, 0);
+  return normalized;
+};
+
+// Helper: Get current time without seconds
+const getNormalizedNow = () => {
+  const now = new Date();
+  now.setSeconds(0, 0);
+  return now;
+};
+
+// Helper: Get week start (Monday)
+const getWeekStart = (date) => {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = (day === 0 ? 6 : day - 1);
+  d.setDate(d.getDate() - diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+// Helper: Get current real date (not from selectedDate)
+const getCurrentRealDate = () => {
+  return normalizeDate(new Date());
+};
+
+// Helper: Check if a day is in the past (for the current week)
+const isDayInPast = (dayDate) => {
+  const today = getCurrentRealDate();
+  const dayStart = normalizeDate(dayDate);
+  return dayStart < today;
+};
+
+// Format time with seconds
+const formatTimeWithSeconds = (date) => {
+  return date.toLocaleTimeString('en-US', { 
+    hour: '2-digit', 
+    minute: '2-digit', 
+    second: '2-digit',
+    hour12: false 
+  });
+};
 
 // ============ OPTIMIZED NOTIFICATION ENGINE ============
 let lastNotificationRun = 0;
@@ -65,7 +111,7 @@ export default function WeekView() {
   const [week, setWeek] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(normalizeDate(new Date()));
   const [showAddModal, setShowAddModal] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showTimeSlotModal, setShowTimeSlotModal] = useState(false);
@@ -85,11 +131,13 @@ export default function WeekView() {
   const [resetting, setResetting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSorting, setIsSorting] = useState(false);
+  const [seconds, setSeconds] = useState(new Date().getSeconds());
   const isLoadingRef = useRef(false);
   const notifiedTasksRef = useRef(new Set());
   const notificationIntervalRef = useRef(null);
   const tasksRef = useRef([]);
   const sortTimeoutRef = useRef(null);
+  const secondsIntervalRef = useRef(null);
   
   // Cache for sorted results
   const sortedCacheRef = useRef({});
@@ -104,6 +152,19 @@ export default function WeekView() {
     return () => {
       if (sortTimeoutRef.current) {
         clearTimeout(sortTimeoutRef.current);
+      }
+    };
+  }, []);
+  
+  // Seconds counter effect
+  useEffect(() => {
+    secondsIntervalRef.current = setInterval(() => {
+      setSeconds(new Date().getSeconds());
+    }, 1000);
+    
+    return () => {
+      if (secondsIntervalRef.current) {
+        clearInterval(secondsIntervalRef.current);
       }
     };
   }, []);
@@ -194,27 +255,28 @@ export default function WeekView() {
   }, []);
 
   const changeWeek = (direction) => {
-    const newDate = new Date(selectedDate);
+    const newDate = normalizeDate(new Date(selectedDate));
     newDate.setDate(selectedDate.getDate() + (direction * 7));
-    setSelectedDate(newDate);
+    setSelectedDate(normalizeDate(newDate));
     notifiedTasksRef.current.clear();
     setVisibleSlotCount(WINDOW_SIZE);
     sortedCacheRef.current = {};
   };
 
+  // getDayDate with proper date normalization
   const getDayDate = useCallback((dayName) => {
-    const startOfWeek = new Date(selectedDate);
+    const startOfWeek = normalizeDate(selectedDate);
     const day = startOfWeek.getDay();
     const diff = (day === 0 ? 6 : day - 1);
     startOfWeek.setDate(startOfWeek.getDate() - diff);
     const dayIndex = DAYS.indexOf(dayName);
-    const targetDate = new Date(startOfWeek);
+    const targetDate = normalizeDate(startOfWeek);
     targetDate.setDate(startOfWeek.getDate() + dayIndex);
-    return targetDate;
+    return normalizeDate(targetDate);
   }, [selectedDate]);
 
   const formatDateRange = useCallback(() => {
-    const startOfWeek = new Date(selectedDate);
+    const startOfWeek = normalizeDate(selectedDate);
     const day = startOfWeek.getDay();
     const diff = (day === 0 ? 6 : day - 1);
     startOfWeek.setDate(startOfWeek.getDate() - diff);
@@ -231,10 +293,8 @@ export default function WeekView() {
   }, [getClockPosition, timeSlots]);
 
   const isDayPastForDate = useCallback((date) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const compareDate = new Date(date);
-    compareDate.setHours(0, 0, 0, 0);
+    const today = getCurrentRealDate();
+    const compareDate = normalizeDate(date);
     return compareDate < today;
   }, []);
 
@@ -333,7 +393,6 @@ export default function WeekView() {
   const hasMoreSlots = sortedDayTimes.length > visibleSlotCount && expandedSections['dayView'];
   const hasMoreWeekSlots = sortedWeekTimes.length > visibleSlotCount && expandedSections['weekView'];
 
-  // FIXED: Throttled sort with debounce - THIS PREVENTS THE FREEZE
   const toggleSortOrder = useCallback(() => {
     if (isSorting) return;
     
@@ -377,41 +436,99 @@ export default function WeekView() {
     setVisibleSlotCount(WINDOW_SIZE);
   }, []);
 
+  // ============ PAST PREVENTION WITH REAL CURRENT DATE ============
+  
+  // Helper to check if a task date/time is in the past using REAL current date
+  const isTaskDateTimeInPast = useCallback((dayName, timeStr, dayDate) => {
+    const taskDate = new Date(dayDate);
+    const [hour, minute] = timeStr.split(':').map(Number);
+    taskDate.setHours(hour, minute, 0, 0);
+    const now = getNormalizedNow();
+    return taskDate.getTime() < now.getTime();
+  }, []);
+
   const handleSlotClick = useCallback((day, time, dayDate) => {
-    if (isDayPast(day) || isTimePast(day, time, dayDate)) return;
-    if (getTaskAtSlot(day, time)) return;
+    const currentRealDate = getCurrentRealDate();
+    const taskDateNormalized = normalizeDate(dayDate);
+    
+    if (taskDateNormalized < currentRealDate) {
+      alert(`Cannot add tasks to past days (${day} ${dayDate.toLocaleDateString()})`);
+      return;
+    }
+    
+    if (taskDateNormalized.getTime() === currentRealDate.getTime() && isTaskDateTimeInPast(day, time, dayDate)) {
+      alert(`Cannot add tasks to past time slots (${time} on ${day})`);
+      return;
+    }
+    
+    if (getTaskAtSlot(day, time)) {
+      alert(`Task already exists at ${time} on ${day}`);
+      return;
+    }
+    
     setSelectedSlot({ day, time });
     setShowSlotModal(true);
-  }, [isDayPast, isTimePast, getTaskAtSlot]);
+  }, [isTaskDateTimeInPast, getTaskAtSlot]);
 
   const handleAddTaskToSlot = async (taskData) => {
-    if (week && selectedSlot) {
-      await addTask(week.id, { 
-        title: taskData.title, 
-        category: taskData.category, 
-        subcategory: taskData.subcategory, 
-        day: selectedSlot.day, 
-        startTime: selectedSlot.time, 
-        endTime: taskData.endTime || `${parseInt(selectedSlot.time.split(':')[0]) + 1}:00` 
-      });
-      await handleRefresh();
+    if (!week || !selectedSlot) return;
+    
+    const taskDate = getDayDate(selectedSlot.day);
+    const currentRealDate = getCurrentRealDate();
+    
+    if (taskDate < currentRealDate) {
+      alert(`❌ Cannot add tasks to past days (${selectedSlot.day})`);
+      setShowSlotModal(false);
+      setSelectedSlot(null);
+      return;
     }
+    
+    if (taskDate.getTime() === currentRealDate.getTime() && isTaskDateTimeInPast(selectedSlot.day, selectedSlot.time, taskDate)) {
+      alert(`❌ Cannot add tasks to past time slots (${selectedSlot.time} on ${selectedSlot.day})`);
+      setShowSlotModal(false);
+      setSelectedSlot(null);
+      return;
+    }
+    
+    await addTask(week.id, { 
+      title: taskData.title, 
+      category: taskData.category, 
+      subcategory: taskData.subcategory, 
+      day: selectedSlot.day, 
+      startTime: selectedSlot.time, 
+      endTime: taskData.endTime || `${parseInt(selectedSlot.time.split(':')[0]) + 1}:00` 
+    });
+    await handleRefresh();
+    
     setShowSlotModal(false);
     setSelectedSlot(null);
   };
 
   const handleAddTask = async (taskData) => {
-    if (week) {
-      await addTask(week.id, { 
-        title: taskData.title, 
-        category: taskData.category, 
-        subcategory: taskData.subcategory, 
-        day: taskData.day, 
-        startTime: taskData.startTime, 
-        endTime: taskData.endTime 
-      });
-      await handleRefresh();
+    if (!week) return;
+    
+    const taskDate = getDayDate(taskData.day);
+    const currentRealDate = getCurrentRealDate();
+    
+    if (taskDate < currentRealDate) {
+      alert(`❌ Cannot add tasks to past days (${taskData.day}, ${taskDate.toLocaleDateString()})`);
+      return;
     }
+    
+    if (taskDate.getTime() === currentRealDate.getTime() && isTaskDateTimeInPast(taskData.day, taskData.startTime, taskDate)) {
+      alert(`❌ Cannot add tasks to past time slots (${taskData.startTime} on ${taskData.day})`);
+      return;
+    }
+    
+    await addTask(week.id, { 
+      title: taskData.title, 
+      category: taskData.category, 
+      subcategory: taskData.subcategory, 
+      day: taskData.day, 
+      startTime: taskData.startTime, 
+      endTime: taskData.endTime 
+    });
+    await handleRefresh();
     setShowAddModal(false);
   };
 
@@ -434,88 +551,6 @@ export default function WeekView() {
     setTimeSlots(updatedSlots);
     await handleRefresh();
     sortedCacheRef.current = {};
-  };
-
-  // ============ PRINT WEEKLY TIMETABLE FUNCTION ============
-  const printWeeklyTimetable = () => {
-    const printWindow = window.open('', '_blank');
-    const firebaseUser = auth.currentUser;
-    const userName = firebaseUser?.displayName || firebaseUser?.email || 'User';
-    
-    const weekNumber = Math.ceil((new Date(selectedDate) - new Date(selectedDate.getFullYear(), 0, 1)) / 86400000 / 7);
-    
-    const allTimes = [...new Set(tasks.map(t => t.startTime))].sort();
-    if (allTimes.length === 0) {
-      for (let hour = 8; hour <= 20; hour++) {
-        allTimes.push(`${hour.toString().padStart(2, '0')}:00`);
-      }
-    }
-    
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>LifeOS Timetable - ${formatDateRange()}</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          @page { size: landscape; margin: 0.3in; }
-          body { font-family: 'Courier New', 'Monaco', monospace; background: white; color: black; padding: 0; margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .container { width: 100%; height: 100%; }
-          .header { text-align: center; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 2px solid #000; }
-          .header h1 { font-size: 18px; letter-spacing: 2px; margin: 0; }
-          .header p { font-size: 9px; color: #444; margin: 2px 0; }
-          .user-info { display: flex; justify-content: space-between; margin-bottom: 12px; padding: 5px 8px; background: #f5f5f5; font-size: 8px; border: 1px solid #ccc; }
-          table { width: 100%; border-collapse: collapse; font-size: 7px; }
-          th { background: #2c2c2c; color: white; padding: 5px 2px; border: 1px solid #444; font-weight: bold; }
-          td { border: 1px solid #ccc; padding: 4px 2px; vertical-align: top; }
-          .time-col { width: 40px; background: #f9f9f9; font-weight: bold; text-align: center; }
-          .status-completed { color: #2e7d32; }
-          .status-active { color: #ed6c02; }
-          .status-missed { color: #d32f2f; }
-          .status-pending { color: #0288d1; }
-          .footer { margin-top: 12px; padding-top: 6px; border-top: 1px solid #ccc; font-size: 7px; text-align: center; color: #666; }
-          @media print { body { margin: 0; padding: 0; } .no-print { display: none; } }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="no-print" style="margin-bottom: 10px;">
-            <button onclick="window.print()" style="padding: 5px 10px; font-size: 11px; margin-right: 8px;">🖨️ Print / Save PDF</button>
-            <button onclick="window.close()" style="padding: 5px 10px; font-size: 11px;">✖ Close</button>
-          </div>
-          <div class="header">
-            <h1>📋 LIFEOS TIMETABLE</h1>
-            <p>${formatDateRange()} | Week #${weekNumber}</p>
-          </div>
-          <div class="user-info">
-            <div><strong>Name:</strong> ${userName}</div>
-            <div><strong>Generated:</strong> ${new Date().toLocaleString()}</div>
-            <div><strong>Tasks:</strong> ${tasks.filter(t => t.status === 'completed').length}/${tasks.length} completed</div>
-          </div>
-          <table>
-            <thead>
-              <tr><th class="time-col">Time</th>${DAYS.map(day => `<th>${day.slice(0, 3)}<br><span style="font-size:6px;font-weight:normal;">${getDayDate(day).toLocaleDateString()}</span></th>`).join('')}</tr>
-            </thead>
-            <tbody>
-              ${allTimes.map(time => {
-                return `<tr>
-                  <td class="time-col">${time}</td>
-                  ${DAYS.map(day => {
-                    const task = tasks.find(t => t.day === day && t.startTime === time);
-                    return `<td>${task ? `<strong>${task.title.length > 20 ? task.title.substring(0, 18) + '..' : task.title}</strong><br>${task.startTime}-${task.endTime}<br><span class="status-${task.status}">${task.status === 'completed' ? '✓ Done' : task.status === 'active' ? '▶ Active' : task.status === 'missed' ? '✗ Missed' : '○ Pending'}</span>${task.notes ? `<br><span style="font-size:6px;color:#666;">📝 ${task.notes.substring(0, 25)}</span>` : ''}</td>` : '<td>—</td>'}`;
-                  }).join('')}
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-          <div class="footer">
-            <p>LifeOS - Time Management System | Print this timetable and fill in tasks manually during offline periods</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `);
-    printWindow.document.close();
   };
 
   const handleResetWeek = async () => {
@@ -558,13 +593,13 @@ export default function WeekView() {
     <TimeGrid>
       <div className="w-full max-w-full overflow-x-auto pb-20">
         <div className="min-w-[320px] space-y-3">
-          {/* Top Bar */}
+          {/* Top Bar with Seconds Counter - NO PRINT BUTTON */}
           <div className="bg-white/5 backdrop-blur-xl rounded-xl p-3 border border-white/10">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <Clock size={14} className="text-purple-400" />
                 <div>
-                  <p className="text-sm font-mono font-bold text-white">{timeString}</p>
+                  <p className="text-sm font-mono font-bold text-white">{timeString}:<span className="text-purple-400 font-bold">{seconds.toString().padStart(2, '0')}</span></p>
                   <p className="text-[9px] text-slate-400">{dateString}</p>
                 </div>
               </div>
@@ -578,9 +613,6 @@ export default function WeekView() {
                 </button>
                 <button onClick={() => setViewMode('week')} className={`p-1.5 rounded-lg transition ${viewMode === 'week' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
                   <Grid size={14} />
-                </button>
-                <button onClick={printWeeklyTimetable} className="p-1.5 rounded-lg text-slate-400 hover:text-white transition" title="Print Weekly Timetable">
-                  <Printer size={14} />
                 </button>
                 <div className="relative">
                   <button onClick={() => setShowFilterMenu(!showFilterMenu)} className="p-1.5 rounded-lg text-slate-400 hover:text-white transition">
@@ -641,37 +673,47 @@ export default function WeekView() {
             <div className="flex gap-1 overflow-x-auto pb-1">
               {DAYS.map((day, idx) => {
                 const date = getDayDate(day);
-                const isToday = date.toDateString() === new Date().toDateString();
+                const isToday = date.toDateString() === getCurrentRealDate().toDateString();
+                const isPastDay = isDayInPast(date);
                 const dayTasks = tasksByDay[day] || [];
                 const hasTasks = dayTasks.length > 0;
                 return (
                   <button
                     key={day}
                     onClick={() => {
-                      setSelectedDay(idx);
-                      setVisibleSlotCount(WINDOW_SIZE);
+                      if (!isPastDay) {
+                        setSelectedDay(idx);
+                        setVisibleSlotCount(WINDOW_SIZE);
+                      }
                     }}
-                    className={`flex-1 min-w-[60px] py-2 rounded-lg text-center transition ${selectedDay === idx ? 'bg-purple-600 text-white' : 'bg-white/5 text-slate-400'} ${isToday ? 'border border-purple-500/50' : ''}`}
+                    disabled={isPastDay}
+                    className={`flex-1 min-w-[60px] py-2 rounded-lg text-center transition ${
+                      isPastDay ? 'opacity-40 cursor-not-allowed bg-slate-800/30 text-slate-500' :
+                      selectedDay === idx ? 'bg-purple-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'
+                    } ${isToday && !isPastDay ? 'border border-purple-500/50' : ''}`}
                   >
                     <div className="text-[10px] font-bold">{day.slice(0, 3)}</div>
                     <div className="text-[8px]">{date.getDate()}</div>
-                    {hasTasks && <div className="w-1 h-1 rounded-full bg-green-500 mx-auto mt-0.5" />}
+                    {hasTasks && !isPastDay && <div className="w-1 h-1 rounded-full bg-green-500 mx-auto mt-0.5" />}
+                    {isPastDay && <div className="text-[6px] text-slate-600 mt-0.5">Past</div>}
                   </button>
                 );
               })}
             </div>
           )}
 
-          {/* Time Slots Grid */}
+          {/* Time Slots Grid - NO PRINT ICON IN TIME COLUMN */}
           <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-xl overflow-hidden w-full">
             <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-white/5 w-full`}>
               <div className="p-2 text-center text-[9px] font-bold text-slate-500 uppercase border-r border-white/5">Time</div>
               {viewMode === 'week' && DAYS.map(day => {
                 const date = getDayDate(day);
+                const isPastDay = isDayInPast(date);
                 return (
-                  <div key={day} className="p-2 text-center">
+                  <div key={day} className={`p-2 text-center ${isPastDay ? 'opacity-40' : ''}`}>
                     <div className="text-[10px] font-bold text-white">{day.slice(0, 3)}</div>
                     <div className="text-[8px] text-slate-400">{date.getDate()}</div>
+                    {isPastDay && <div className="text-[6px] text-slate-600 mt-0.5">Past</div>}
                   </div>
                 );
               })}
@@ -682,10 +724,11 @@ export default function WeekView() {
                 {visibleDaySlots.map((time) => {
                   const task = getTaskAtSlot(DAYS[selectedDay], time);
                   const date = getDayDate(DAYS[selectedDay]);
-                  const isPast = isDayPastForDate(date);
-                  const canAdd = !isPast && !isTimePast(DAYS[selectedDay], time, date);
+                  const currentRealDate = getCurrentRealDate();
+                  const isPast = date < currentRealDate;
+                  const canAdd = !isPast && !isTaskDateTimeInPast(DAYS[selectedDay], time, date);
                   return (
-                    <div key={time} className="grid grid-cols-1 border-b border-white/10 relative w-full">
+                    <div key={time} className={`grid grid-cols-1 border-b border-white/10 relative w-full ${isPast ? 'opacity-50' : ''}`}>
                       <div className="p-1.5 border-r border-white/5 flex items-center justify-between bg-white/5">
                         <span className="text-[9px] font-mono text-slate-400">{time}</span>
                       </div>
@@ -707,8 +750,10 @@ export default function WeekView() {
                             <Plus size={14} className="text-slate-500" />
                           </div>
                         ) : (
-                          <div className="h-12 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center">
+                          <div className="h-12 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center cursor-not-allowed">
                             <Lock size={10} className="text-slate-600" />
+                            {isPast && <span className="text-[8px] text-slate-600 ml-1">Past Day</span>}
+                            {!isPast && <span className="text-[8px] text-slate-600 ml-1">Past Time</span>}
                           </div>
                         )}
                       </div>
@@ -753,10 +798,11 @@ export default function WeekView() {
                       {DAYS.map(day => {
                         const task = getTaskAtSlot(day, time);
                         const date = getDayDate(day);
-                        const isPast = isDayPastForDate(date);
-                        const canAdd = !isPast && !isTimePast(day, time, date);
+                        const currentRealDate = getCurrentRealDate();
+                        const isPast = date < currentRealDate;
+                        const canAdd = !isPast && !isTaskDateTimeInPast(day, time, date);
                         return (
-                          <div key={`${day}-${time}`} className="p-0.5 w-full" onClick={() => canAdd && handleSlotClick(day, time, date)}>
+                          <div key={`${day}-${time}`} className={`p-0.5 w-full ${isPast ? 'opacity-50' : ''}`} onClick={() => canAdd && handleSlotClick(day, time, date)}>
                             {task ? (
                               <TaskCell 
                                 key={task.id}
@@ -774,8 +820,10 @@ export default function WeekView() {
                                 <Plus size={12} className="text-slate-500" />
                               </div>
                             ) : (
-                              <div className="h-12 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center">
+                              <div className="h-12 rounded-lg border border-white/10 bg-white/5 opacity-30 flex items-center justify-center cursor-not-allowed">
                                 <Lock size={10} className="text-slate-600" />
+                                {isPast && <span className="text-[8px] text-slate-600 ml-1">Past Day</span>}
+                                {!isPast && <span className="text-[8px] text-slate-600 ml-1">Past Time</span>}
                               </div>
                             )}
                           </div>
@@ -824,13 +872,14 @@ export default function WeekView() {
             </div>
           )}
 
-          {/* FIXED: TaskModal now receives the current selected day */}
+          {/* TaskModal with weekStartDate for exact date display */}
           <TaskModal 
             isOpen={showAddModal} 
             onClose={() => setShowAddModal(false)} 
             onSave={handleAddTask} 
             theme={theme}
             day={DAYS[selectedDay]}
+            weekStartDate={getWeekStart(selectedDate)}
           />
           
           <TaskModal 
@@ -839,7 +888,8 @@ export default function WeekView() {
             day={selectedSlot?.day} 
             time={selectedSlot?.time} 
             onSave={handleAddTaskToSlot} 
-            theme={theme} 
+            theme={theme}
+            weekStartDate={getWeekStart(selectedDate)}
           />
           
           {showThemeModal && (

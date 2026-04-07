@@ -1,4 +1,4 @@
-// src/services/firebaseTaskService.js - OPTIMIZED VERSION
+// src/services/firebaseTaskService.js - FULLY FIXED VERSION
 import { 
   db, auth, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, 
   query, where, Timestamp, writeBatch 
@@ -312,10 +312,9 @@ export const completeTask = async (taskId, actualEndTime = null, completionType 
   await updateWeekMetrics(task.weekId);
 };
 
-// OPTIMIZED: Reschedule using batch write - PREVENTS PURPLE SCREEN
 export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, weekId, carriedProgress = null) => {
   const userId = getUserId();
-  const batch = writeBatch(db); // Use batch for atomic operation
+  const batch = writeBatch(db);
   
   const taskRef = doc(db, TASKS_COLLECTION, taskId);
   const taskDoc = await getDoc(taskRef);
@@ -336,7 +335,6 @@ export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, w
   const newCumulativeProgress = wasEverStarted ? Math.min(100, previousCumulative + currentProgress) : previousCumulative;
   const newRescheduleCount = (originalTask.rescheduleCount || 0) + 1;
   
-  // Batch update original task
   batch.update(taskRef, {
     status: 'rescheduled',
     rescheduledTo: `${newDay} at ${newStartTime}`,
@@ -348,7 +346,6 @@ export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, w
     updatedAt: Timestamp.now()
   });
   
-  // Batch create new task
   const newTaskId = `${originalTask.weekId}_${newDay}_${newStartTime}_${Date.now()}`;
   const newTaskRef = doc(db, TASKS_COLLECTION, newTaskId);
   
@@ -385,10 +382,7 @@ export const rescheduleTask = async (taskId, newDay, newStartTime, newEndTime, w
     updatedAt: Timestamp.now()
   });
   
-  // Execute batch - ONE atomic operation
   await batch.commit();
-  
-  // Update metrics once after batch
   await updateWeekMetrics(originalTask.weekId);
   
   return newTaskId;
@@ -413,12 +407,9 @@ export const deleteTask = async (taskId) => {
   if (task && task.weekId) await updateWeekMetrics(task.weekId);
 };
 
-// OPTIMIZED: Throttled metrics update to prevent multiple rapid updates
-let metricsUpdateQueue = new Map();
 let metricsUpdateTimeout = null;
 
 export const updateWeekMetrics = async (weekId) => {
-  // Debounce metrics updates - prevents multiple rapid updates
   if (metricsUpdateTimeout) {
     clearTimeout(metricsUpdateTimeout);
   }
@@ -437,24 +428,56 @@ export const updateWeekMetrics = async (weekId) => {
       } finally {
         metricsUpdateTimeout = null;
       }
-    }, 100); // 100ms debounce
+    }, 100);
   });
 };
 
+// ============ COMPLETELY FIXED: checkMissedTasks - ONLY checks PAST weeks ============
 export const checkMissedTasks = async (weekId, selectedDate) => {
   const tasks = await getWeekTasks(weekId);
-  const now = new Date();
   let updated = false;
   const batch = writeBatch(db);
   
+  // Get the week data
+  const weekRef = doc(db, WEEKS_COLLECTION, weekId);
+  const weekDoc = await getDoc(weekRef);
+  
+  if (!weekDoc.exists()) {
+    return;
+  }
+  
+  const weekData = weekDoc.data();
+  const weekStart = weekData.weekStart.toDate();
+  
+  const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  
+  // Get today's date (start of day)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  // CRITICAL: If this week is in the FUTURE, don't mark any tasks as missed
+  if (weekStart > today) {
+    console.log(`[checkMissedTasks] Week ${weekStart.toDateString()} is in the future, skipping missed check`);
+    return;
+  }
+  
+  const now = new Date();
+  
   for (const task of tasks) {
-    if (task.status === 'pending' && task.title && !task.rescheduledFrom) {
+    // Only check pending tasks with actual titles
+    if (task.status === 'pending' && task.title && task.title.trim() !== '' && !task.rescheduledFrom) {
+      
+      // Calculate task's actual date
+      const taskDayIndex = daysOfWeek.indexOf(task.day);
+      const taskDate = new Date(weekStart);
+      taskDate.setDate(weekStart.getDate() + taskDayIndex);
+      
       const [endHour, endMin] = task.endTime.split(':').map(Number);
-      const taskDate = new Date(selectedDate);
       const endTime = new Date(taskDate);
       endTime.setHours(endHour, endMin, 0, 0);
       
-      if (now > endTime) {
+      // ONLY mark as missed if the task's date is in the PAST (before today)
+      if (taskDate < today) {
         const taskRef = doc(db, TASKS_COLLECTION, task.id);
         batch.update(taskRef, {
           status: 'missed',
@@ -462,6 +485,7 @@ export const checkMissedTasks = async (weekId, selectedDate) => {
           updatedAt: Timestamp.now()
         });
         updated = true;
+        console.log(`[checkMissedTasks] Marked task as missed: ${task.title} on ${task.day} (date: ${taskDate.toDateString()})`);
       }
     }
   }

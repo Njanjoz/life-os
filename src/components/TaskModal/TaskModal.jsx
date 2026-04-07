@@ -1,6 +1,7 @@
 // src/components/TaskModal/TaskModal.jsx
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { X, Clock, Calendar, Tag, AlertCircle, Flag, FileText } from 'lucide-react';
+import { X, Clock, Calendar, Tag, AlertCircle, Flag, FileText, CheckCircle, Loader2 } from 'lucide-react';
+import { updateTask } from '../../services/firebaseTaskService';
 
 export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, theme, day, time, weekStartDate }) {
   // ===== ALL HOOKS MUST BE CALLED BEFORE ANY CONDITIONAL RETURN =====
@@ -14,12 +15,16 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
   const [priority, setPriority] = useState('medium');
   const [notes, setNotes] = useState('');
   const [timeWarning, setTimeWarning] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [saveError, setSaveError] = useState('');
   
   // Refs to track state
   const isTaskBeingEdited = useRef(false);
   const initialLoadDone = useRef(false);
   const userEditedEndTime = useRef(false);
   const userEditedStartTime = useRef(false);
+  const successTimeoutRef = useRef(null);
 
   // Helper functions
   function getCurrentDay() {
@@ -138,6 +143,12 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
       userEditedEndTime.current = false;
       userEditedStartTime.current = false;
       setTimeWarning('');
+      setIsSaving(false);
+      setShowSuccess(false);
+      setSaveError('');
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
       return;
     }
 
@@ -174,6 +185,15 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
     initialLoadDone.current = true;
   }, [task, isOpen, day, time]);
 
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Only auto-set end time for NEW tasks when start time changes AND user hasn't edited end time
   useEffect(() => {
     // Don't run until initial load is done
@@ -199,13 +219,13 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
   // Escape key handler
   useEffect(() => {
     const handleEscape = (e) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape' && isOpen && !isSaving) {
         onClose();
       }
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, isSaving]);
 
   // ===== CONDITIONAL RETURN AFTER ALL HOOKS =====
   if (!isOpen) return null;
@@ -252,6 +272,9 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    if (isSaving) return;
+    
     if (!title.trim()) {
       alert('Please enter a task title');
       return;
@@ -291,10 +314,42 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
       notes: notes.trim()
     };
     
-    if (onSave) {
-      await onSave(taskData);
+    setIsSaving(true);
+    setSaveError('');
+    
+    try {
+      if (task && task.id && weekId) {
+        // UPDATE existing task using updateTask from firebaseTaskService
+        console.log('Updating task:', task.id, taskData);
+        await updateTask(task.id, taskData);
+        
+        // Call onUpdate to refresh the UI
+        if (onUpdate) {
+          await onUpdate();
+        }
+      } else if (onSave) {
+        // CREATE new task
+        await onSave(taskData);
+      }
+      
+      // Show success animation
+      setShowSuccess(true);
+      
+      // Close modal after success animation
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+      
+      successTimeoutRef.current = setTimeout(() => {
+        setShowSuccess(false);
+        onClose();
+      }, 800);
+      
+    } catch (error) {
+      console.error('Error saving task:', error);
+      setSaveError('Failed to save task. Please try again.');
+      setIsSaving(false);
     }
-    onClose();
   };
 
   const getPriorityColor = (p) => {
@@ -318,6 +373,31 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
   // Check if time is passed for warning display
   const isStartTimePassed = isTimePassed(taskDay, startTime);
   const isEndTimeInvalid = startTime && endTime && !isEndTimeValid(startTime, endTime);
+  const isFormValid = title.trim() && startTime && endTime;
+
+  // Success overlay
+  if (showSuccess) {
+    return (
+      <div 
+        className="fixed inset-0 z-[10000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+        style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, margin: 0 }}
+      >
+        <div className="bg-gradient-to-br from-green-900/90 to-emerald-900/90 rounded-xl p-8 text-center border border-green-500/50 shadow-2xl animate-in zoom-in duration-300">
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-20 h-20 rounded-full bg-green-500/20 animate-ping" />
+            </div>
+            <CheckCircle size={64} className="text-green-400 relative z-10 animate-bounce" />
+          </div>
+          <h3 className="text-xl font-bold text-white mt-4">Success!</h3>
+          <p className="text-sm text-green-300 mt-2">
+            {task ? 'Task updated successfully' : 'Task created successfully'}
+          </p>
+          <div className="mt-4 w-12 h-1 bg-green-500/50 rounded-full mx-auto animate-pulse" />
+        </div>
+      </div>
+    );
+  }
 
   // JSX return
   return (
@@ -325,7 +405,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
       className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" 
       style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, margin: 0 }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !isSaving) onClose();
       }}
       role="dialog"
       aria-modal="true"
@@ -338,7 +418,8 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
           </h2>
           <button 
             onClick={onClose} 
-            className="text-slate-400 hover:text-white transition p-1 rounded hover:bg-white/10"
+            disabled={isSaving}
+            className="text-slate-400 hover:text-white transition p-1 rounded hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Close modal"
           >
             <X size={18} />
@@ -354,6 +435,14 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             </div>
           )}
           
+          {/* Error Banner */}
+          {saveError && (
+            <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-2 flex items-start gap-2">
+              <AlertCircle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-red-300">{saveError}</p>
+            </div>
+          )}
+          
           {/* Task Title */}
           <div>
             <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Task Title</label>
@@ -364,6 +453,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
               placeholder="e.g., Complete React project"
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none transition"
               autoFocus
+              disabled={isSaving}
             />
           </div>
           
@@ -377,6 +467,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
+                disabled={isSaving}
               >
                 {categories.map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
@@ -391,6 +482,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
                 onChange={(e) => setSubcategory(e.target.value)}
                 placeholder="e.g., Frontend"
                 className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
+                disabled={isSaving}
               />
             </div>
           </div>
@@ -406,6 +498,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
                   value={taskDay}
                   onChange={handleDayChange}
                   className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none"
+                  disabled={isSaving}
                 >
                   {days.map(d => (
                     <option key={d} value={d}>{d}</option>
@@ -431,6 +524,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
                   isStartTimePassed ? 'border-yellow-500/50' : 'border-white/10'
                 }`}
                 step="60"
+                disabled={isSaving}
               />
               {isStartTimePassed && (
                 <p className="text-[8px] text-yellow-500 mt-1">⚠️ This time has already passed</p>
@@ -451,6 +545,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
                 isEndTimeInvalid ? 'border-red-500/50' : 'border-white/10'
               }`}
               step="60"
+              disabled={isSaving}
             />
             {!isTaskBeingEdited.current && !userEditedEndTime.current && (
               <p className="text-[8px] text-slate-500 mt-1">Auto-sets 1 hour after start — you can edit</p>
@@ -474,11 +569,12 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
                   key={p.value}
                   type="button"
                   onClick={() => setPriority(p.value)}
+                  disabled={isSaving}
                   className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${
                     priority === p.value 
                       ? `${p.bg} border ${p.border} text-white`
                       : 'bg-white/10 text-slate-400 hover:bg-white/20'
-                  }`}
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
                   aria-label={`Set priority to ${p.label}`}
                 >
                   {p.label}
@@ -498,6 +594,7 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
               placeholder="Add details, subtasks, or reminders..."
               rows={3}
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm focus:border-purple-500 focus:outline-none resize-none"
+              disabled={isSaving}
             />
           </div>
           
@@ -530,17 +627,25 @@ export function TaskModal({ isOpen, onClose, onSave, task, weekId, onUpdate, the
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-2 rounded-lg bg-white/10 text-white text-sm font-medium hover:bg-white/20 transition"
+              disabled={isSaving}
+              className="flex-1 py-2 rounded-lg bg-white/10 text-white text-sm font-medium hover:bg-white/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={!title.trim() || !startTime || !endTime}
-              className="flex-1 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!isFormValid || isSaving}
+              className="flex-1 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               style={{ backgroundColor: theme?.primary }}
             >
-              {task ? 'Save Changes' : 'Create Task'}
+              {isSaving ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                task ? 'Save Changes' : 'Create Task'
+              )}
             </button>
           </div>
         </form>

@@ -186,6 +186,8 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   const overdueNotifiedRef = useRef(false);
   const timeArrivedNotifiedRef = useRef(false);
   const timeEndedNotifiedRef = useRef(false);
+  const clickTimeoutRef = useRef(null);
+  const isClickProcessingRef = useRef(false);
   
   const performance = useMemo(() => calculatePerformanceMetrics(localTask), [localTask]);
   const priorityStyles = useMemo(() => getPriorityStyles(localTask?.priority), [localTask?.priority]);
@@ -209,11 +211,11 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
   }, [localTask, selectedDate, isPast]);
   
   useEffect(() => {
-    if (isExpanded || showCompletionConfirm) {
+    if (isExpanded || showCompletionConfirm || showReschedule || showManualEntry || showEditModal) {
       document.body.style.overflow = 'hidden';
       return () => { document.body.style.overflow = 'unset'; };
     }
-  }, [isExpanded, showCompletionConfirm]);
+  }, [isExpanded, showCompletionConfirm, showReschedule, showManualEntry, showEditModal]);
   
   const currentNow = useMemo(() => new Date(), [timeProgress]);
   
@@ -272,6 +274,36 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     }
   }, [isTaskOverdue, localTask]);
   
+  // Cleanup click timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+      }
+    };
+  }, []);
+  
+  const handleCellClick = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Prevent multiple rapid clicks
+    if (isClickProcessingRef.current) return;
+    
+    if (clickTimeoutRef.current) {
+      clearTimeout(clickTimeoutRef.current);
+    }
+    
+    isClickProcessingRef.current = true;
+    
+    clickTimeoutRef.current = setTimeout(() => {
+      if (isClickable && !isProcessing) {
+        setIsExpanded(prev => !prev);
+      }
+      isClickProcessingRef.current = false;
+    }, 50);
+  }, [isProcessing]);
+  
   const handleStart = useCallback(async () => {
     if (isStarting || isProcessing) return;
     if (!isPast && localTask && localTask.status === 'pending') {
@@ -300,7 +332,9 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     }
   }, [isPast, localTask, onUpdate, isStarting, isProcessing]);
   
-  const handleCompleteClick = useCallback(() => {
+  const handleCompleteClick = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
     setShowCompletionConfirm(true);
   }, []);
   
@@ -464,6 +498,26 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     }
   }, [localTask, manualStart, manualEnd, onUpdate, isProcessing]);
   
+  const handleEditClick = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // First close the popup
+    setIsExpanded(false);
+    // Then open edit modal after a short delay
+    setTimeout(() => {
+      setShowEditModal(true);
+    }, 100);
+  }, []);
+  
+  const handleEditModalClose = useCallback(() => {
+    setShowEditModal(false);
+  }, []);
+  
+  const handleEditModalUpdate = useCallback(() => {
+    onUpdate();
+    setShowEditModal(false);
+  }, [onUpdate]);
+  
   if (!localTask) return null;
   
   const isOngoing = localTask.status === 'active';
@@ -573,14 +627,13 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
           </div>
         </div>
         
-        {/* Task Details Section - NEW */}
+        {/* Task Details Section */}
         <div className="p-4 border-b border-white/10">
           <div className="flex items-center gap-2 mb-3">
             <Tag size={12} className="text-purple-400" />
             <h4 className="text-xs font-semibold text-white uppercase tracking-wide">Task Details</h4>
           </div>
           <div className="space-y-3">
-            {/* Priority */}
             <div className="flex items-center gap-2">
               <Flag size={12} className="text-slate-400" />
               <span className="text-[9px] text-slate-400">Priority:</span>
@@ -590,14 +643,12 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
               </span>
             </div>
             
-            {/* Category */}
             <div className="flex items-center gap-2">
               <Tag size={12} className="text-slate-400" />
               <span className="text-[9px] text-slate-400">Category:</span>
               <span className="text-[10px] text-white bg-slate-800 px-2 py-0.5 rounded-full">{localTask.category || 'General'}</span>
             </div>
             
-            {/* Subcategory */}
             {localTask.subcategory && localTask.subcategory !== 'General' && (
               <div className="flex items-center gap-2">
                 <Tag size={12} className="text-slate-400" />
@@ -606,14 +657,12 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
               </div>
             )}
             
-            {/* Day & Time */}
             <div className="flex items-center gap-2">
               <Calendar size={12} className="text-slate-400" />
               <span className="text-[9px] text-slate-400">Schedule:</span>
               <span className="text-[10px] text-white bg-slate-800 px-2 py-0.5 rounded-full">{localTask.day} at {localTask.startTime}</span>
             </div>
             
-            {/* Notes */}
             {localTask.notes && (
               <div className="mt-2 p-2 bg-slate-800/30 rounded-lg">
                 <div className="flex items-center gap-1 mb-1">
@@ -684,7 +733,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
             </button>
           )}
           
-          <button onClick={() => setShowEditModal(true)} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white transition">
+          <button onClick={handleEditClick} className="w-full py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white transition">
             <Edit2 size={14} /> Edit Task
           </button>
         </div>
@@ -777,7 +826,7 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
     <>
       <div className="relative h-full w-full">
         <button
-          onClick={() => isClickable && !isProcessing && setIsExpanded(!isExpanded)}
+          onClick={handleCellClick}
           className={`w-full h-14 rounded-lg border relative overflow-hidden transition-all duration-200 text-left ${isClickable && !isProcessing ? 'cursor-pointer hover:brightness-110' : 'cursor-default'} ${cellColor}`}
           disabled={!isClickable || isProcessing}
         >
@@ -814,7 +863,6 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
               {isMissed && (
                 <span className="text-[6px] text-red-400 font-bold">Missed</span>
               )}
-              {/* Priority indicator on cell */}
               {localTask.priority && localTask.priority !== 'medium' && !isCompleted && (
                 <span className="text-[8px] ml-1">{priorityStyles.icon}</span>
               )}
@@ -831,13 +879,10 @@ export default function TaskCell({ task, weekId, now, selectedDate, onUpdate, th
       {showEditModal && createPortal(
         <TaskModal 
           isOpen={showEditModal} 
-          onClose={() => setShowEditModal(false)} 
+          onClose={handleEditModalClose} 
           task={localTask} 
           weekId={weekId} 
-          onUpdate={() => {
-            onUpdate();
-            setShowEditModal(false);
-          }} 
+          onUpdate={handleEditModalUpdate} 
           theme={theme} 
         />,
         document.body

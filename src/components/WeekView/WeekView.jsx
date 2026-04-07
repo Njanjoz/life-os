@@ -1,4 +1,4 @@
-// src/components/WeekView/WeekView.jsx - WITH PAST DAY COLUMNS BLURRED & SECONDS COUNTER
+// src/components/WeekView/WeekView.jsx - Fixed filter menu positioning
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2 } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
@@ -50,16 +50,6 @@ const isDayInPast = (dayDate) => {
   const today = getCurrentRealDate();
   const dayStart = normalizeDate(dayDate);
   return dayStart < today;
-};
-
-// Format time with seconds
-const formatTimeWithSeconds = (date) => {
-  return date.toLocaleTimeString('en-US', { 
-    hour: '2-digit', 
-    minute: '2-digit', 
-    second: '2-digit',
-    hour12: false 
-  });
 };
 
 // ============ OPTIMIZED NOTIFICATION ENGINE ============
@@ -138,6 +128,7 @@ export default function WeekView() {
   const tasksRef = useRef([]);
   const sortTimeoutRef = useRef(null);
   const secondsIntervalRef = useRef(null);
+  const filterButtonRef = useRef(null);
   
   // Cache for sorted results
   const sortedCacheRef = useRef({});
@@ -168,6 +159,20 @@ export default function WeekView() {
       }
     };
   }, []);
+  
+  // Close filter menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showFilterMenu && filterButtonRef.current && !filterButtonRef.current.contains(event.target)) {
+        setShowFilterMenu(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showFilterMenu]);
   
   // Load tasks with pre-calculated minutes
   const loadWeek = useCallback(async () => {
@@ -591,10 +596,10 @@ export default function WeekView() {
 
   return (
     <TimeGrid>
-      <div className="w-full max-w-full overflow-x-auto pb-20">
+      <div className="w-full max-w-full overflow-x-auto pb-20 relative">
         <div className="min-w-[320px] space-y-3">
-          {/* Top Bar with Seconds Counter - NO PRINT BUTTON */}
-          <div className="bg-white/5 backdrop-blur-xl rounded-xl p-3 border border-white/10">
+          {/* Top Bar with Seconds Counter */}
+          <div className="bg-white/5 backdrop-blur-xl rounded-xl p-3 border border-white/10 sticky top-0 z-20">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <Clock size={14} className="text-purple-400" />
@@ -614,28 +619,33 @@ export default function WeekView() {
                 <button onClick={() => setViewMode('week')} className={`p-1.5 rounded-lg transition ${viewMode === 'week' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
                   <Grid size={14} />
                 </button>
-                <div className="relative">
-                  <button onClick={() => setShowFilterMenu(!showFilterMenu)} className="p-1.5 rounded-lg text-slate-400 hover:text-white transition">
+                <div className="relative" ref={filterButtonRef}>
+                  <button 
+                    onClick={() => setShowFilterMenu(!showFilterMenu)} 
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white transition"
+                  >
                     <Filter size={14} />
                   </button>
                   {showFilterMenu && (
-                    <div className="absolute right-0 top-full mt-1 bg-slate-800 rounded-lg border border-white/10 shadow-lg z-20 min-w-[180px]">
-                      <button onClick={toggleSortOrder} disabled={isSorting} className="w-full px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2 disabled:opacity-50">
-                        {isSorting ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> Sorting...</> : <><ArrowUpDown size={12} /> Sort: {sortOrder === 'asc' ? 'Earliest First' : 'Latest First'}</>}
-                      </button>
-                      <button onClick={expandAll} className="w-full px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
-                        <ChevronDown size={12} /> Expand All
-                      </button>
-                      <button onClick={collapseAll} className="w-full px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
-                        <ChevronUp size={12} /> Collapse All
-                      </button>
-                      <div className="h-px bg-white/10 my-1" />
-                      <button onClick={handleResetWeek} disabled={resetting} className="w-full px-3 py-2 text-left text-xs text-yellow-400 hover:bg-yellow-500/10 transition flex items-center gap-2">
-                        <Trash2 size={12} /> Reset This Week
-                      </button>
-                      <button onClick={handleResetAll} disabled={resetting} className="w-full px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 transition flex items-center gap-2">
-                        <RotateCcw size={12} /> Complete Reset (All Data)
-                      </button>
+                    <div className="absolute right-0 top-full mt-2 bg-slate-800 rounded-lg border border-white/10 shadow-xl z-[100] min-w-[200px] overflow-visible">
+                      <div className="py-1">
+                        <button onClick={toggleSortOrder} disabled={isSorting} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2 disabled:opacity-50">
+                          {isSorting ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> Sorting...</> : <><ArrowUpDown size={12} /> Sort: {sortOrder === 'asc' ? 'Earliest First' : 'Latest First'}</>}
+                        </button>
+                        <button onClick={expandAll} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
+                          <ChevronDown size={12} /> Expand All
+                        </button>
+                        <button onClick={collapseAll} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
+                          <ChevronUp size={12} /> Collapse All
+                        </button>
+                        <div className="h-px bg-white/10 my-1" />
+                        <button onClick={handleResetWeek} disabled={resetting} className="w-full px-4 py-2 text-left text-xs text-yellow-400 hover:bg-yellow-500/10 transition flex items-center gap-2">
+                          <Trash2 size={12} /> Reset This Week
+                        </button>
+                        <button onClick={handleResetAll} disabled={resetting} className="w-full px-4 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 transition flex items-center gap-2">
+                          <RotateCcw size={12} /> Complete Reset (All Data)
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -702,8 +712,8 @@ export default function WeekView() {
             </div>
           )}
 
-          {/* Time Slots Grid - NO PRINT ICON IN TIME COLUMN */}
-          <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-xl overflow-hidden w-full">
+          {/* Time Slots Grid */}
+          <div className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-xl overflow-hidden w-full relative z-10">
             <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-white/5 w-full`}>
               <div className="p-2 text-center text-[9px] font-bold text-slate-500 uppercase border-r border-white/5">Time</div>
               {viewMode === 'week' && DAYS.map(day => {

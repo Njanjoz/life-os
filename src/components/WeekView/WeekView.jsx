@@ -1,4 +1,4 @@
-// src/components/WeekView/WeekView.jsx - COMPLETELY FIXED VERSION
+// src/components/WeekView/WeekView.jsx - FIXED MOBILE + DESKTOP
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2 } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
@@ -15,7 +15,6 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 const normalizeDate = (date) => {
   if (!date) return new Date();
   const normalized = new Date(date);
-  // Guard against Invalid Date
   if (isNaN(normalized.getTime())) return new Date();
   normalized.setHours(0, 0, 0, 0);
   return normalized;
@@ -55,6 +54,9 @@ let lastNotificationRun = 0;
 const NOTIFICATION_THROTTLE_MS = 15000;
 
 const runNotificationEngine = (tasks, notifiedSet) => {
+  // Skip notifications on mobile entirely to prevent Chrome hangs
+  if (typeof window !== 'undefined' && window.innerWidth < 768) return;
+  
   const now = Date.now();
   if (now - lastNotificationRun < NOTIFICATION_THROTTLE_MS) return;
   lastNotificationRun = now;
@@ -96,22 +98,22 @@ const TimeGrid = React.memo(({ children }) => <>{children}</>);
 export default function WeekView() {
   const { user } = useAuth();
   
-  // Mobile detection inside component
-  const isMobileDevice = useMemo(() => 
-    typeof window !== 'undefined' && window.innerWidth < 768, 
-  []);
+  // Mobile detection inside component with window check
+  const isMobileDevice = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 768;
+  }, []);
   
   const WINDOW_SIZE = isMobileDevice ? 2 : 3;
   const LOAD_MORE_STEP = isMobileDevice ? 2 : 3;
   
   // Throttle clock for mobile
-  const clockInterval = isMobileDevice ? 5000 : 1000;
+  const clockInterval = isMobileDevice ? 10000 : 1000;
   const { now, timeString, dateString, getCurrentTimePosition: getClockPosition } = useRealTimeClock(clockInterval);
   
   const [week, setWeek] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  // FIXED: Use a stable date string for initial state
   const [selectedDate, setSelectedDate] = useState(() => normalizeDate(new Date()));
   const [showAddModal, setShowAddModal] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
@@ -135,6 +137,7 @@ export default function WeekView() {
   const [resetting, setResetting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSorting, setIsSorting] = useState(false);
+  // Desktop only: seconds counter
   const [seconds, setSeconds] = useState(() => new Date().getSeconds());
   const isLoadingRef = useRef(false);
   const notifiedTasksRef = useRef(new Set());
@@ -145,6 +148,7 @@ export default function WeekView() {
   const filterButtonRef = useRef(null);
   const isMountedRef = useRef(true);
   const lastSelectedDateKeyRef = useRef(null);
+  const loadWeekRef = useRef(null); // Add ref to prevent infinite loops
   
   // Cache for sorted results
   const sortedCacheRef = useRef({});
@@ -154,31 +158,33 @@ export default function WeekView() {
     tasksRef.current = tasks;
   }, [tasks]);
   
-  // Cleanup on unmount
+  // Cleanup all intervals on unmount
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-    };
-  }, []);
-  
-  // Cleanup sort timeout
-  useEffect(() => {
-    return () => {
+      // Clean up all intervals
+      if (notificationIntervalRef.current) {
+        clearInterval(notificationIntervalRef.current);
+      }
+      if (secondsIntervalRef.current) {
+        clearInterval(secondsIntervalRef.current);
+      }
       if (sortTimeoutRef.current) {
         clearTimeout(sortTimeoutRef.current);
       }
     };
   }, []);
   
-  // Seconds counter effect - throttled for mobile
+  // Seconds counter — desktop only
   useEffect(() => {
-    const intervalTime = isMobileDevice ? 2000 : 1000;
+    if (isMobileDevice) return;
+    
     secondsIntervalRef.current = setInterval(() => {
       if (isMountedRef.current) {
         setSeconds(new Date().getSeconds());
       }
-    }, intervalTime);
+    }, 1000);
     
     return () => {
       if (secondsIntervalRef.current) {
@@ -194,7 +200,6 @@ export default function WeekView() {
         setShowFilterMenu(false);
       }
     };
-    
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
@@ -244,7 +249,6 @@ export default function WeekView() {
       const allSlots = taskTimes.length > 0 ? taskTimes : savedTimeSlots;
       if (isMountedRef.current) setTimeSlots(allSlots);
       
-      // FIXED: Wrap checkMissedTasks in try-catch to prevent date parsing errors
       try {
         await checkMissedTasks(currentWeek.id, selectedDate);
       } catch (missedError) {
@@ -267,20 +271,24 @@ export default function WeekView() {
     }
   }, [user, selectedDate]);
 
+  // Store loadWeek in ref to avoid dependency issues
+  useEffect(() => {
+    loadWeekRef.current = loadWeek;
+  }, [loadWeek]);
+
   // FIXED: Use stable date string to prevent infinite loop
-  // Only reload when the actual date changes, not on every render
   useEffect(() => {
     if (!user) return;
     
     const currentDateKey = selectedDate.toDateString();
     const lastDateKey = lastSelectedDateKeyRef.current;
     
-    // Only load if user exists and date has changed or first load
+    // Only load if date has changed or first load
     if (lastDateKey !== currentDateKey) {
       lastSelectedDateKeyRef.current = currentDateKey;
-      loadWeek();
+      loadWeekRef.current();
     }
-  }, [user, selectedDate, loadWeek]);
+  }, [user, selectedDate]); // Remove loadWeek dependency
 
   // Reset visible slot count when changing days or view mode
   useEffect(() => {
@@ -288,14 +296,12 @@ export default function WeekView() {
     setExpandedSections({ dayView: false, weekView: false });
   }, [selectedDay, viewMode, WINDOW_SIZE]);
 
-  // Optimized notification system - guarded for mobile
+  // Optimized notification system - DISABLED on mobile
   useEffect(() => {
-    if (!user) return;
+    if (!user || isMobileDevice) return;
     
-    // Don't auto-request on mobile - causes Chrome to hang
-    if (!isMobileDevice) {
-      requestNotificationPermission().catch(console.warn);
-    }
+    // Only request permission on desktop
+    requestNotificationPermission().catch(console.warn);
     
     if (notificationIntervalRef.current) {
       clearInterval(notificationIntervalRef.current);
@@ -305,10 +311,9 @@ export default function WeekView() {
       runNotificationEngine(tasksRef.current, notifiedTasksRef.current);
     }
     
-    const notifyInterval = isMobileDevice ? 120000 : 60000;
     notificationIntervalRef.current = setInterval(() => {
       runNotificationEngine(tasksRef.current, notifiedTasksRef.current);
-    }, notifyInterval);
+    }, 60000);
     
     return () => {
       if (notificationIntervalRef.current) {
@@ -328,9 +333,9 @@ export default function WeekView() {
     lastSelectedDateKeyRef.current = null;
     setTimeout(() => {
       lastSelectedDateKeyRef.current = currentDateKey;
-      loadWeek();
+      loadWeekRef.current();
     }, 0);
-  }, [WINDOW_SIZE, selectedDate, loadWeek]);
+  }, [WINDOW_SIZE, selectedDate]);
 
   const changeWeek = useCallback((direction) => {
     const newDate = normalizeDate(new Date(selectedDate));
@@ -526,7 +531,6 @@ export default function WeekView() {
     return taskDate.getTime() < now.getTime();
   }, []);
 
-  // Use console.warn instead of alert to prevent Chrome hang
   const handleSlotClick = useCallback((day, time, dayDate) => {
     const currentRealDate = getCurrentRealDate();
     const taskDateNormalized = normalizeDate(dayDate);
@@ -675,7 +679,347 @@ export default function WeekView() {
     );
   }
 
-  // Rest of the JSX remains the same as in the previous working version...
+  // ================================================================
+  // MOBILE LITE RENDER
+  // ================================================================
+  if (isMobileDevice) {
+    return (
+      <TimeGrid>
+        <div className="w-full max-w-full overflow-x-auto pb-20 relative">
+          <div className="min-w-[320px] space-y-3">
+
+            {/* Top Bar */}
+            <div className="bg-slate-900 rounded-xl p-3 border border-white/10 sticky top-0 z-20">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Clock size={14} className="text-purple-400" />
+                  <div>
+                    <p className="text-sm font-mono font-bold text-white">{timeString}</p>
+                    <p className="text-[9px] text-slate-400">{dateString}</p>
+                  </div>
+                </div>
+                <div className="flex gap-1">
+                  <button onClick={() => changeWeek(-1)} className="p-1.5 hover:bg-white/10 rounded-lg"><ChevronLeft size={14} /></button>
+                  <button onClick={() => changeWeek(1)} className="p-1.5 hover:bg-white/10 rounded-lg"><ChevronRight size={14} /></button>
+                </div>
+                <div className="flex gap-1">
+                  <button onClick={() => setViewMode('day')} className={`p-1.5 rounded-lg transition ${viewMode === 'day' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                    <List size={14} />
+                  </button>
+                  <button onClick={() => setViewMode('week')} className={`p-1.5 rounded-lg transition ${viewMode === 'week' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                    <Grid size={14} />
+                  </button>
+                  <div className="relative" ref={filterButtonRef}>
+                    <button onClick={() => setShowFilterMenu(!showFilterMenu)} className="p-1.5 rounded-lg text-slate-400 hover:text-white transition">
+                      <Filter size={14} />
+                    </button>
+                    {showFilterMenu && (
+                      <div className="absolute right-0 top-full mt-2 bg-slate-800 rounded-lg border border-white/10 shadow-xl z-[100] min-w-[200px]">
+                        <div className="py-1">
+                          <button onClick={toggleSortOrder} disabled={isSorting} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2 disabled:opacity-50">
+                            {isSorting ? <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> Sorting...</> : <><ArrowUpDown size={12} /> Sort: {sortOrder === 'asc' ? 'Earliest First' : 'Latest First'}</>}
+                          </button>
+                          <button onClick={expandAll} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
+                            <ChevronDown size={12} /> Expand All
+                          </button>
+                          <button onClick={collapseAll} className="w-full px-4 py-2 text-left text-xs text-white hover:bg-white/10 transition flex items-center gap-2">
+                            <ChevronUp size={12} /> Collapse All
+                          </button>
+                          <div className="h-px bg-white/10 my-1" />
+                          <button onClick={handleResetWeek} disabled={resetting} className="w-full px-4 py-2 text-left text-xs text-yellow-400 hover:bg-yellow-500/10 transition flex items-center gap-2">
+                            <Trash2 size={12} /> Reset This Week
+                          </button>
+                          <button onClick={handleResetAll} disabled={resetting} className="w-full px-4 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 transition flex items-center gap-2">
+                            <RotateCcw size={12} /> Complete Reset (All Data)
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => setShowAddModal(true)} className="p-1.5 rounded-lg text-white bg-purple-600 hover:bg-purple-700">
+                    <Plus size={14} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats Row */}
+            <div className="grid grid-cols-4 gap-1.5">
+              <div className="bg-slate-900 border border-white/5 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Score</p><p className="text-sm font-bold text-white">{metrics.weeklyScore || 0}</p></div>
+              <div className="bg-slate-900 border border-white/5 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Complete</p><p className="text-sm font-bold text-white">{metrics.completionRate || 0}%</p></div>
+              <div className="bg-slate-900 border border-white/5 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Discipline</p><p className="text-sm font-bold text-white">{metrics.disciplineScore || 0}</p></div>
+              <div className="bg-slate-900 border border-white/5 rounded-lg p-1.5 text-center"><p className="text-[8px] text-slate-400">Delay</p><p className="text-sm font-bold text-orange-400">{metrics.avgDelay || 0}m</p></div>
+            </div>
+
+            {/* Week Navigation */}
+            <div className="flex items-center justify-between bg-slate-900 border border-white/10 rounded-lg p-2">
+              <Calendar size={12} className="text-purple-400" />
+              <span className="text-[10px] font-medium text-white">{formatDateRange()}</span>
+              <div className="flex gap-1">
+                <button onClick={() => setShowThemeModal(true)} className="p-1 hover:bg-white/10 rounded"><Palette size={12} className="text-purple-400" /></button>
+                <button onClick={() => setShowTimeSlotModal(true)} className="p-1 hover:bg-white/10 rounded"><Clock size={12} /></button>
+              </div>
+            </div>
+
+            {/* Day Selector */}
+            {viewMode === 'day' && (
+              <div className="flex gap-1 overflow-x-auto pb-1">
+                {DAYS.map((day, idx) => {
+                  const date = getDayDate(day);
+                  const isToday = date.toDateString() === getCurrentRealDate().toDateString();
+                  const isPastDay = isDayInPast(date);
+                  const dayTasks = tasksByDay[day] || [];
+                  const hasTasks = dayTasks.length > 0;
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => {
+                        if (!isPastDay) {
+                          setSelectedDay(idx);
+                          setVisibleSlotCount(WINDOW_SIZE);
+                          setExpandedSections({ dayView: false, weekView: false });
+                        }
+                      }}
+                      disabled={isPastDay}
+                      className={`flex-1 min-w-[60px] py-2 rounded-lg text-center transition ${
+                        isPastDay ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500' :
+                        selectedDay === idx ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400'
+                      } ${isToday && !isPastDay ? 'border border-purple-500/50' : ''}`}
+                    >
+                      <div className="text-[10px] font-bold">{day.slice(0, 3)}</div>
+                      <div className="text-[8px]">{date.getDate()}</div>
+                      {hasTasks && !isPastDay && <div className="w-1 h-1 rounded-full bg-green-500 mx-auto mt-0.5" />}
+                      {isPastDay && <div className="text-[6px] text-slate-600 mt-0.5">Past</div>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Time Slots Grid */}
+            <div className="bg-slate-900 border border-white/10 rounded-xl overflow-hidden w-full relative z-10">
+              <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-slate-800 w-full`}>
+                <div className="p-2 text-center text-[9px] font-bold text-slate-500 uppercase border-r border-white/5">Time</div>
+                {viewMode === 'week' && DAYS.map(day => {
+                  const date = getDayDate(day);
+                  const isPastDay = isDayInPast(date);
+                  return (
+                    <div key={day} className={`p-2 text-center ${isPastDay ? 'opacity-40' : ''}`}>
+                      <div className="text-[10px] font-bold text-white">{day.slice(0, 3)}</div>
+                      <div className="text-[8px] text-slate-400">{date.getDate()}</div>
+                      {isPastDay && <div className="text-[6px] text-slate-600 mt-0.5">Past</div>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {viewMode === 'day' ? (
+                <>
+                  {visibleDaySlots.map((time) => {
+                    const task = getTaskAtSlot(DAYS[selectedDay], time);
+                    const date = getDayDate(DAYS[selectedDay]);
+                    const currentRealDate = getCurrentRealDate();
+                    const isPast = date < currentRealDate;
+                    const canAdd = !isPast && !isTaskDateTimeInPast(DAYS[selectedDay], time, date);
+                    return (
+                      <div key={time} className={`grid grid-cols-1 border-b border-white/10 relative w-full ${isPast ? 'opacity-50' : ''}`}>
+                        <div className="p-1.5 border-r border-white/5 flex items-center justify-between bg-slate-800">
+                          <span className="text-[9px] font-mono text-slate-400">{time}</span>
+                        </div>
+                        <div className="p-0.5 w-full">
+                          {task ? (
+                            <TaskCell 
+                              key={task.id}
+                              task={task} 
+                              weekId={week?.id} 
+                              now={now} 
+                              selectedDate={date} 
+                              onUpdate={handleRefresh} 
+                              theme={theme} 
+                              isPast={isPast} 
+                              viewMode={viewMode} 
+                            />
+                          ) : canAdd ? (
+                            <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-12 rounded-lg border border-dashed border-white/20 bg-slate-800 flex items-center justify-center active:bg-slate-700 transition cursor-pointer">
+                              <Plus size={14} className="text-slate-500" />
+                            </div>
+                          ) : (
+                            <div className="h-12 rounded-lg border border-white/10 bg-slate-800 opacity-30 flex items-center justify-center cursor-not-allowed">
+                              <Lock size={10} className="text-slate-600" />
+                              {isPast && <span className="text-[8px] text-slate-600 ml-1">Past Day</span>}
+                              {!isPast && <span className="text-[8px] text-slate-600 ml-1">Past Time</span>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {hasMoreSlots && (
+                    <div className="flex gap-2 p-2 bg-slate-800 border-t border-white/10">
+                      <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-purple-400 transition flex items-center justify-center gap-1 bg-slate-700 rounded-lg">
+                        <ChevronDown size={12} /> Load {LOAD_MORE_STEP} More ({sortedDayTimes.length - visibleSlotCount} remaining)
+                      </button>
+                      <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-slate-400 transition flex items-center justify-center gap-1 bg-slate-700 rounded-lg">
+                        Load All ({sortedDayTimes.length})
+                      </button>
+                    </div>
+                  )}
+
+                  {visibleSlotCount > WINDOW_SIZE && (
+                    <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-purple-400 transition flex items-center justify-center gap-1 bg-slate-800 border-t border-white/10">
+                      <ChevronUp size={12} /> Show Less (back to {WINDOW_SIZE} slots)
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {visibleWeekSlots.map((time) => {
+                    let hasAnyTask = false;
+                    for (let i = 0; i < DAYS.length; i++) {
+                      if (getTaskAtSlot(DAYS[i], time)) { hasAnyTask = true; break; }
+                    }
+                    if (!hasAnyTask) return null;
+
+                    return (
+                      <div key={time} className="grid grid-cols-8 border-b border-white/10 relative w-full">
+                        <div className="p-1.5 border-r border-white/5 flex items-center justify-center bg-slate-800">
+                          <span className="text-[9px] font-mono text-slate-400">{time}</span>
+                        </div>
+                        {DAYS.map(day => {
+                          const task = getTaskAtSlot(day, time);
+                          const date = getDayDate(day);
+                          const currentRealDate = getCurrentRealDate();
+                          const isPast = date < currentRealDate;
+                          const canAdd = !isPast && !isTaskDateTimeInPast(day, time, date);
+                          return (
+                            <div key={`${day}-${time}`} className={`p-0.5 w-full ${isPast ? 'opacity-50' : ''}`} onClick={() => canAdd && handleSlotClick(day, time, date)}>
+                              {task ? (
+                                <TaskCell 
+                                  key={task.id}
+                                  task={task} 
+                                  weekId={week?.id} 
+                                  now={now} 
+                                  selectedDate={date} 
+                                  onUpdate={handleRefresh} 
+                                  theme={theme} 
+                                  isPast={isPast} 
+                                  viewMode={viewMode} 
+                                />
+                              ) : canAdd ? (
+                                <div className="h-12 rounded-lg border border-dashed border-white/20 bg-slate-800 flex items-center justify-center active:bg-slate-700 transition cursor-pointer">
+                                  <Plus size={12} className="text-slate-500" />
+                                </div>
+                              ) : (
+                                <div className="h-12 rounded-lg border border-white/10 bg-slate-800 opacity-30 flex items-center justify-center cursor-not-allowed">
+                                  <Lock size={10} className="text-slate-600" />
+                                  {isPast && <span className="text-[8px] text-slate-600 ml-1">Past Day</span>}
+                                  {!isPast && <span className="text-[8px] text-slate-600 ml-1">Past Time</span>}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {currentPos && currentPos.slotIndex === timeSlots.indexOf(time) && (
+                          <div className="absolute left-0 right-0 pointer-events-none z-10">
+                            <div className="h-[1px] bg-red-500 w-full" />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {hasMoreWeekSlots && (
+                    <div className="flex gap-2 p-2 bg-slate-800 border-t border-white/10">
+                      <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-purple-400 transition flex items-center justify-center gap-1 bg-slate-700 rounded-lg">
+                        <ChevronDown size={12} /> Load {LOAD_MORE_STEP} More ({sortedWeekTimes.length - visibleSlotCount} remaining)
+                      </button>
+                      <button onClick={loadAllSlots} className="py-2 px-3 text-center text-[10px] text-slate-400 transition flex items-center justify-center gap-1 bg-slate-700 rounded-lg">
+                        Load All ({sortedWeekTimes.length})
+                      </button>
+                    </div>
+                  )}
+
+                  {visibleSlotCount > WINDOW_SIZE && (
+                    <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-purple-400 transition flex items-center justify-center gap-1 bg-slate-800 border-t border-white/10">
+                      <ChevronUp size={12} /> Show Less (back to {WINDOW_SIZE} slots)
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Empty State */}
+            {viewMode === 'day' && currentDayTimes.length === 0 && (
+              <div className="bg-slate-900 border border-white/10 rounded-xl p-6 text-center">
+                <Calendar size={24} className="text-slate-500 mx-auto mb-2" />
+                <p className="text-xs text-slate-400">No tasks for {DAYS[selectedDay]}</p>
+                <button onClick={() => setShowAddModal(true)} className="mt-2 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs">
+                  Add Task
+                </button>
+              </div>
+            )}
+
+            {/* Modals */}
+            <TaskModal 
+              isOpen={showAddModal} 
+              onClose={() => setShowAddModal(false)} 
+              onSave={handleAddTask} 
+              theme={theme}
+              day={DAYS[selectedDay]}
+              weekStartDate={getWeekStart(selectedDate)}
+            />
+            
+            <TaskModal 
+              isOpen={showSlotModal} 
+              onClose={() => { setShowSlotModal(false); setSelectedSlot(null); }} 
+              day={selectedSlot?.day} 
+              time={selectedSlot?.time} 
+              onSave={handleAddTaskToSlot} 
+              theme={theme}
+              weekStartDate={getWeekStart(selectedDate)}
+            />
+
+            {/* Theme Modal - No backdrop-blur */}
+            {showThemeModal && (
+              <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+                <div className="bg-slate-900 rounded-xl p-4 w-80 border border-white/10">
+                  <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Theme</h3><button onClick={() => setShowThemeModal(false)}><X size={14} /></button></div>
+                  <div className="space-y-2">
+                    <div><label className="text-[10px] text-slate-400">Primary</label><input type="color" value={theme.primary} onChange={e => handleThemeUpdate({...theme, primary: e.target.value})} className="w-full h-8 rounded-lg mt-1" /></div>
+                    <div><label className="text-[10px] text-slate-400">Secondary</label><input type="color" value={theme.secondary} onChange={e => handleThemeUpdate({...theme, secondary: e.target.value})} className="w-full h-8 rounded-lg mt-1" /></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Time Slot Modal - No backdrop-blur */}
+            {showTimeSlotModal && (
+              <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+                <div className="bg-slate-900 rounded-xl p-4 w-80 border border-white/10">
+                  <div className="flex justify-between mb-3"><h3 className="text-sm font-bold text-white">Time Slots</h3><button onClick={() => setShowTimeSlotModal(false)}><X size={14} /></button></div>
+                  <div className="flex gap-2 mb-3"><input type="time" value={newTimeSlot} onChange={e => setNewTimeSlot(e.target.value)} className="flex-1 p-1.5 text-xs rounded bg-slate-800 border border-white/10" /><button onClick={handleAddTimeSlot} className="px-3 py-1.5 rounded text-xs bg-purple-600">Add</button></div>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {timeSlots.map(slot => (
+                      <div key={slot} className="flex justify-between items-center p-1.5 rounded bg-slate-800">
+                        <span className="text-xs">{slot}</span>
+                        <button onClick={() => handleRemoveTimeSlot(slot)} className="text-red-400 text-[9px]">Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+      </TimeGrid>
+    );
+  }
+
+  // ================================================================
+  // DESKTOP RENDER
+  // ================================================================
   return (
     <TimeGrid>
       <div className="w-full max-w-full overflow-x-auto pb-20 relative">
@@ -788,7 +1132,7 @@ export default function WeekView() {
             </div>
           )}
 
-          {/* Time Slots Grid - No backdrop-blur for Chrome compatibility */}
+          {/* Time Slots Grid */}
           <div className="bg-slate-900/60 border border-white/10 rounded-xl overflow-hidden w-full relative z-10">
             <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-slate-900/40 w-full`}>
               <div className="p-2 text-center text-[9px] font-bold text-slate-500 uppercase border-r border-white/5">Time</div>

@@ -1,4 +1,4 @@
-// src/components/WeekView/WeekView.jsx - DESKTOP ORIGINAL STYLES + MOBILE B&W LITE
+// src/components/WeekView/WeekView.jsx - FULLY FIXED (Mobile B&W Lite + Desktop Original)
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Calendar, TrendingUp, Target, Zap, ChevronLeft, ChevronRight, Plus, X, Palette, Clock, Sparkles, Lock, Grid, List, ChevronDown, ChevronUp, ArrowUpDown, RotateCcw, Filter, Trash2 } from 'lucide-react';
 import TaskCell from '../TaskCell/TaskCell';
@@ -287,7 +287,7 @@ export default function WeekView() {
     setExpandedSections({ dayView: false, weekView: false });
   }, [selectedDay, viewMode, WINDOW_SIZE]);
 
-  // Notification system - RESTORED for both desktop and mobile
+  // Notification system - RESTORED
   useEffect(() => {
     if (!user) return;
     
@@ -665,7 +665,7 @@ export default function WeekView() {
   }
 
   // ================================================================
-  // MOBILE B&W LITE RENDER - NO BLUR, FLAT BLACK & WHITE
+  // MOBILE B&W LITE RENDER - NO PURPLE, NO GRADIENTS, SIMPLE BLACK/WHITE/RED
   // ================================================================
   if (isMobileDevice) {
     return (
@@ -673,7 +673,7 @@ export default function WeekView() {
         <div className="w-full max-w-full overflow-x-auto pb-20 relative bg-black min-h-screen">
           <div className="min-w-[320px] space-y-3 p-3">
 
-            {/* Top Bar - Black & White */}
+            {/* Top Bar - Simple B&W */}
             <div className="bg-black rounded-xl p-3 border border-white/10 sticky top-0 z-20">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
@@ -728,7 +728,7 @@ export default function WeekView() {
               </div>
             </div>
 
-            {/* Stats Row - Black & White */}
+            {/* Stats Row - Simple B&W */}
             <div className="grid grid-cols-4 gap-1.5">
               <div className="bg-white/5 border border-white/10 rounded-lg p-1.5 text-center">
                 <p className="text-[8px] text-white/40">Score</p>
@@ -748,7 +748,7 @@ export default function WeekView() {
               </div>
             </div>
 
-            {/* Week Navigation - Black & White */}
+            {/* Week Navigation - Simple B&W */}
             <div className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg p-2">
               <Calendar size={12} className="text-white/60" />
               <span className="text-[10px] font-medium text-white">{formatDateRange()}</span>
@@ -758,7 +758,7 @@ export default function WeekView() {
               </div>
             </div>
 
-            {/* Day Selector - Black & White */}
+            {/* Day Selector - Simple B&W */}
             {viewMode === 'day' && (
               <div className="flex gap-1 overflow-x-auto pb-1">
                 {DAYS.map((day, idx) => {
@@ -793,7 +793,7 @@ export default function WeekView() {
               </div>
             )}
 
-            {/* Time Slots Grid - Black & White, Flat Cells */}
+            {/* Time Slots Grid - Simple B&W Cells */}
             <div className="bg-black border border-white/20 rounded-xl overflow-hidden w-full relative z-10">
               <div className={`grid ${viewMode === 'day' ? 'grid-cols-1' : 'grid-cols-8'} border-b border-white/10 bg-white/5 w-full`}>
                 <div className="p-2 text-center text-[9px] font-bold text-white/60 uppercase border-r border-white/10">Time</div>
@@ -834,7 +834,8 @@ export default function WeekView() {
                               onUpdate={handleRefresh} 
                               theme={theme} 
                               isPast={isPast} 
-                              viewMode={viewMode} 
+                              viewMode={viewMode}
+                              isMobile={true}
                             />
                           ) : canAdd ? (
                             <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-12 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
@@ -868,14 +869,9 @@ export default function WeekView() {
                   )}
                 </>
               ) : (
+                // WEEK VIEW - Simple B&W Grid
                 <>
-                  {visibleWeekSlots.map((time) => {
-                    let hasAnyTask = false;
-                    for (let i = 0; i < DAYS.length; i++) {
-                      if (getTaskAtSlot(DAYS[i], time)) { hasAnyTask = true; break; }
-                    }
-                    if (!hasAnyTask) return null;
-
+                  {sortedWeekTimes.map((time) => {
                     return (
                       <div key={time} className="grid grid-cols-8 border-b border-white/10 relative w-full">
                         <div className="p-1.5 border-r border-white/10 flex items-center justify-center bg-white/5">
@@ -888,7 +884,11 @@ export default function WeekView() {
                           const isPast = date < currentRealDate;
                           const canAdd = !isPast && !isTaskDateTimeInPast(day, time, date);
                           return (
-                            <div key={`${day}-${time}`} className={`p-0.5 w-full bg-black ${isPast ? 'opacity-50' : ''}`} onClick={() => canAdd && handleSlotClick(day, time, date)}>
+                            <div 
+                              key={`${day}-${time}`} 
+                              className={`p-0.5 w-full bg-black ${isPast ? 'opacity-50' : ''}`} 
+                              onClick={() => canAdd && handleSlotClick(day, time, date)}
+                            >
                               {task ? (
                                 <TaskCell 
                                   key={task.id}
@@ -899,7 +899,8 @@ export default function WeekView() {
                                   onUpdate={handleRefresh} 
                                   theme={theme} 
                                   isPast={isPast} 
-                                  viewMode={viewMode} 
+                                  viewMode={viewMode}
+                                  isMobile={true}
                                 />
                               ) : canAdd ? (
                                 <div className="h-12 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center active:bg-white/10 transition cursor-pointer">
@@ -921,7 +922,7 @@ export default function WeekView() {
                       </div>
                     );
                   })}
-
+                  
                   {hasMoreWeekSlots && (
                     <div className="flex gap-2 p-2 bg-white/5 border-t border-white/10">
                       <button onClick={loadMoreSlots} className="flex-1 py-2 text-center text-[10px] text-white transition flex items-center justify-center gap-1 bg-white/10 rounded-lg">
@@ -932,7 +933,7 @@ export default function WeekView() {
                       </button>
                     </div>
                   )}
-
+                  
                   {visibleSlotCount > WINDOW_SIZE && (
                     <button onClick={showLessSlots} className="w-full py-2 text-center text-[10px] text-white transition flex items-center justify-center gap-1 bg-white/5 border-t border-white/10">
                       <ChevronUp size={12} /> Show Less
@@ -942,7 +943,7 @@ export default function WeekView() {
               )}
             </div>
 
-            {/* Empty State - Black & White */}
+            {/* Empty State - Simple B&W */}
             {viewMode === 'day' && currentDayTimes.length === 0 && (
               <div className="bg-white/5 border border-white/10 rounded-xl p-6 text-center">
                 <Calendar size={24} className="text-white/30 mx-auto mb-2" />
@@ -953,7 +954,7 @@ export default function WeekView() {
               </div>
             )}
 
-            {/* Modals - Black & White */}
+            {/* Modals - Simple B&W */}
             <TaskModal 
               isOpen={showAddModal} 
               onClose={() => setShowAddModal(false)} 
@@ -961,6 +962,7 @@ export default function WeekView() {
               theme={theme}
               day={DAYS[selectedDay]}
               weekStartDate={getWeekStart(selectedDate)}
+              isMobile={true}
             />
             
             <TaskModal 
@@ -971,6 +973,7 @@ export default function WeekView() {
               onSave={handleAddTaskToSlot} 
               theme={theme}
               weekStartDate={getWeekStart(selectedDate)}
+              isMobile={true}
             />
 
             {showThemeModal && (
@@ -1165,7 +1168,8 @@ export default function WeekView() {
                             onUpdate={handleRefresh} 
                             theme={theme} 
                             isPast={isPast} 
-                            viewMode={viewMode} 
+                            viewMode={viewMode}
+                            isMobile={false}
                           />
                         ) : canAdd ? (
                           <div onClick={() => handleSlotClick(DAYS[selectedDay], time, date)} className="h-12 rounded-lg border border-dashed border-white/20 bg-slate-800/50 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
@@ -1235,7 +1239,8 @@ export default function WeekView() {
                                 onUpdate={handleRefresh} 
                                 theme={theme} 
                                 isPast={isPast} 
-                                viewMode={viewMode} 
+                                viewMode={viewMode}
+                                isMobile={false}
                               />
                             ) : canAdd ? (
                               <div className="h-12 rounded-lg border border-dashed border-white/20 bg-slate-800/50 flex items-center justify-center hover:border-purple-500/50 hover:bg-purple-500/10 transition cursor-pointer">
@@ -1299,6 +1304,7 @@ export default function WeekView() {
             theme={theme}
             day={DAYS[selectedDay]}
             weekStartDate={getWeekStart(selectedDate)}
+            isMobile={false}
           />
           
           <TaskModal 
@@ -1309,6 +1315,7 @@ export default function WeekView() {
             onSave={handleAddTaskToSlot} 
             theme={theme}
             weekStartDate={getWeekStart(selectedDate)}
+            isMobile={false}
           />
           
           {showThemeModal && (
